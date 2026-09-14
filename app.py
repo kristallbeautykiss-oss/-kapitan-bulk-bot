@@ -1,23 +1,28 @@
 import os
 import re
 import requests
-
 from flask import Flask, request
-
 
 app = Flask(__name__)
 
-
-# =========================================================
+# =========================
 # НАСТРОЙКИ
-# =========================================================
+# =========================
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"]
+YCLIENTS_PARTNER_TOKEN = os.environ["YCLIENTS_PARTNER_TOKEN"]
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-YCLIENTS_API = "https://api.yclients.ru/api/v1"
 
+YCLIENTS_API = "https://api.yclients.ru/api/v1"
+YCLIENTS_MARKETPLACE_API = "https://api.yclients.ru"
+
+APPLICATION_ID = 51162
+
+YCLIENTS_WEBHOOK_URL = (
+    "https://kapitan-bulk-bot.onrender.com/yclients/webhook"
+)
 
 BRANCHES = {
     "Нагатинская": {
@@ -39,9 +44,9 @@ BRANCHES = {
 }
 
 
-# =========================================================
+# =========================
 # TELEGRAM
-# =========================================================
+# =========================
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {
@@ -52,14 +57,11 @@ def send_message(chat_id, text, reply_markup=None):
     if reply_markup:
         payload["reply_markup"] = reply_markup
 
-    try:
-        requests.post(
-            f"{TELEGRAM_API}/sendMessage",
-            json=payload,
-            timeout=15,
-        )
-    except Exception as e:
-        print("Telegram send_message error:", e)
+    requests.post(
+        f"{TELEGRAM_API}/sendMessage",
+        json=payload,
+        timeout=20,
+    )
 
 
 def main_keyboard():
@@ -89,9 +91,7 @@ def branch_keyboard():
                 {"text": "Базовская"},
                 {"text": "Истринская"},
             ],
-            [
-                {"text": "← Назад"},
-            ],
+            [{"text": "← Назад"}],
         ],
         "resize_keyboard": True,
     }
@@ -102,37 +102,33 @@ def phone_keyboard():
         "keyboard": [
             [
                 {
-                    "text": "📱 Поделиться номером телефона",
+                    "text": "📱 Отправить мой номер",
                     "request_contact": True,
                 }
             ],
-            [
-                {"text": "← Назад"},
-            ],
+            [{"text": "← Назад"}],
         ],
         "resize_keyboard": True,
         "one_time_keyboard": True,
     }
 
 
-def booking_button(branch_name):
-    branch = BRANCHES[branch_name]
-
+def booking_button(url):
     return {
         "inline_keyboard": [
             [
                 {
-                    "text": f"Записаться — {branch_name}",
-                    "url": branch["booking_url"],
+                    "text": "Записаться онлайн",
+                    "url": url,
                 }
             ]
         ]
     }
 
 
-# =========================================================
-# YCLIENTS
-# =========================================================
+# =========================
+# ТЕЛЕФОН
+# =========================
 
 def normalize_phone(phone):
     digits = re.sub(r"\D", "", phone or "")
@@ -140,13 +136,17 @@ def normalize_phone(phone):
     if len(digits) == 11 and digits.startswith("8"):
         digits = "7" + digits[1:]
 
-    elif len(digits) == 10:
+    if len(digits) == 10:
         digits = "7" + digits
 
     return digits
 
 
-def yclients_headers():
+# =========================
+# YCLIENTS — АВТОРИЗАЦИЯ
+# =========================
+
+def yclients_user_headers():
     return {
         "Authorization": f"Bearer {YCLIENTS_USER_TOKEN}",
         "Accept": "application/vnd.yclients.v2+json",
@@ -154,10 +154,60 @@ def yclients_headers():
     }
 
 
-def search_client_in_branch(company_id, phone):
-    url = f"{YCLIENTS_API}/company/{company_id}/clients/search"
+def yclients_partner_headers():
+    return {
+        "Authorization": f"Bearer {YCLIENTS_PARTNER_TOKEN}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
 
-    body = {
+
+# =========================
+# YCLIENTS — АКТИВАЦИЯ
+# =========================
+
+def activate_yclients_branch(salon_id):
+    url = (
+        f"{YCLIENTS_MARKETPLACE_API}"
+        f"/marketplace/partner/callback"
+    )
+
+    payload = {
+        "salon_id": int(salon_id),
+        "application_id": APPLICATION_ID,
+        "webhook_urls": [
+            YCLIENTS_WEBHOOK_URL
+        ],
+    }
+
+    response = requests.post(
+        url,
+        headers=yclients_partner_headers(),
+        json=payload,
+        timeout=30,
+    )
+
+    print(
+        "YCLIENTS ACTIVATION:",
+        salon_id,
+        response.status_code,
+        response.text[:1000],
+    )
+
+    return response
+
+
+# =========================
+# YCLIENTS — ПОИСК КЛИЕНТА
+# =========================
+
+def search_client_in_branch(company_id, phone):
+    url = (
+        f"{YCLIENTS_API}"
+        f"/company/{company_id}/clients/search"
+    )
+
+    payload = {
         "page": 1,
         "page_size": 10,
         "fields": [
@@ -179,43 +229,41 @@ def search_client_in_branch(company_id, phone):
     try:
         response = requests.post(
             url,
-            headers=yclients_headers(),
-            json=body,
-            timeout=15,
+            headers=yclients_user_headers(),
+            json=payload,
+            timeout=30,
         )
 
-        result = {
-            "ok": response.ok,
-            "status": response.status_code,
-            "clients": [],
+        print(
+            "CLIENT SEARCH:",
+            company_id,
+            response.status_code,
+            response.text[:500],
+        )
+
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "status": response.status_code,
+                "clients": [],
+            }
+
+        data = response.json()
+
+        clients = data.get("data", [])
+
+        return {
+            "ok": True,
+            "status": 200,
+            "clients": clients,
         }
 
-        if not response.ok:
-            print(
-                "YCLIENTS error:",
-                company_id,
-                response.status_code,
-                response.text,
-            )
-            return result
-
-        data = response.json().get("data", [])
-
-        if isinstance(data, list):
-            clients = data
-
-        elif isinstance(data, dict):
-            clients = data.get("items", [])
-
-        else:
-            clients = []
-
-        result["clients"] = clients
-
-        return result
-
     except Exception as e:
-        print("YCLIENTS request error:", company_id, e)
+        print(
+            "YCLIENTS client search error:",
+            company_id,
+            e,
+        )
 
         return {
             "ok": False,
@@ -225,19 +273,26 @@ def search_client_in_branch(company_id, phone):
 
 
 def find_client_everywhere(phone):
-    phone = normalize_phone(phone)
+    results = []
+    errors = []
 
-    found = []
-    errors = {}
+    normalized = normalize_phone(phone)
 
-    for branch_name, branch in BRANCHES.items():
+    for branch_name, branch_data in BRANCHES.items():
+        company_id = branch_data["company_id"]
+
         result = search_client_in_branch(
-            branch["company_id"],
-            phone,
+            company_id,
+            normalized,
         )
 
         if not result["ok"]:
-            errors[branch_name] = result["status"]
+            errors.append(
+                (
+                    branch_name,
+                    result["status"],
+                )
+            )
             continue
 
         for client in result["clients"]:
@@ -245,73 +300,185 @@ def find_client_everywhere(phone):
                 str(client.get("phone", ""))
             )
 
-            if client_phone == phone:
-                found.append(
+            if client_phone == normalized:
+                results.append(
                     {
                         "branch": branch_name,
                         "client": client,
                     }
                 )
-                break
 
-    return found, errors
+    return results, errors
 
 
-# =========================================================
-# ПРОВЕРКА СЕРВЕРА
-# =========================================================
+# =========================
+# ГЛАВНАЯ
+# =========================
 
 @app.route("/", methods=["GET"])
 def home():
     return "Kapitan Bulk bot is running", 200
 
 
-# =========================================================
-# YCLIENTS REGISTRATION REDIRECT
-# =========================================================
+# =========================
+# YCLIENTS — ПОДКЛЮЧЕНИЕ
+# =========================
 
 @app.route("/yclients/connect", methods=["GET"])
 def yclients_connect():
+    salon_ids = []
+
     salon_id = request.args.get("salon_id")
 
-    if not salon_id:
-        return "YCLIENTS: salon_id не передан", 400
+    if salon_id:
+        salon_ids.append(salon_id)
 
-    print("YCLIENTS salon_id received:", salon_id)
+    salon_ids_array = request.args.getlist(
+        "salon_ids[]"
+    )
+
+    if salon_ids_array:
+        salon_ids.extend(salon_ids_array)
+
+    if not salon_ids:
+        print(
+            "YCLIENTS CONNECT PARAMS:",
+            dict(request.args),
+        )
+
+        return (
+            "YCLIENTS не передал salon_id. "
+            "Попробуйте подключить приложение заново.",
+            400,
+        )
+
+    activation_results = []
+
+    for current_salon_id in salon_ids:
+        try:
+            response = activate_yclients_branch(
+                current_salon_id
+            )
+
+            activation_results.append(
+                {
+                    "salon_id": current_salon_id,
+                    "status": response.status_code,
+                    "body": response.text[:500],
+                }
+            )
+
+        except Exception as e:
+            print(
+                "YCLIENTS activation error:",
+                current_salon_id,
+                e,
+            )
+
+            activation_results.append(
+                {
+                    "salon_id": current_salon_id,
+                    "status": "error",
+                    "body": str(e),
+                }
+            )
+
+    success = all(
+        item["status"] in (
+            200,
+            201,
+        )
+        for item in activation_results
+    )
+
+    if success:
+        return (
+            """
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Капитан Бульк!</title>
+            </head>
+            <body style="
+                font-family: Arial, sans-serif;
+                text-align: center;
+                padding: 50px;
+            ">
+                <h2>Готово! 🦭</h2>
+                <p>
+                    Капитан Бульк успешно подключён
+                    к YCLIENTS.
+                </p>
+                <p>
+                    Эту страницу можно закрыть.
+                </p>
+            </body>
+            </html>
+            """,
+            200,
+        )
+
+    print(
+        "YCLIENTS ACTIVATION RESULTS:",
+        activation_results,
+    )
+
+    statuses = ", ".join(
+        f'{item["salon_id"]}: '
+        f'{item["status"]}'
+        for item in activation_results
+    )
 
     return (
-        f"YCLIENTS подключение получено. salon_id={salon_id}",
-        200,
+        "YCLIENTS не удалось активировать "
+        f"интеграцию. Коды: {statuses}",
+        500,
     )
 
 
-# =========================================================
-# YCLIENTS WEBHOOK
-# =========================================================
+# =========================
+# YCLIENTS — WEBHOOK
+# =========================
 
-@app.route("/yclients/webhook", methods=["POST"])
+@app.route(
+    "/yclients/webhook",
+    methods=["POST"],
+)
 def yclients_webhook():
     try:
-        data = request.get_json(silent=True)
+        data = request.get_json(
+            silent=True
+        )
 
-        print("YCLIENTS WEBHOOK RECEIVED")
+        print(
+            "YCLIENTS WEBHOOK RECEIVED"
+        )
+
         print(data)
 
         return "ok", 200
 
     except Exception as e:
-        print("YCLIENTS webhook error:", e)
+        print(
+            "YCLIENTS webhook error:",
+            e,
+        )
 
         return "ok", 200
 
 
-# =========================================================
+# =========================
 # TELEGRAM WEBHOOK
-# =========================================================
+# =========================
 
-@app.route("/telegram", methods=["POST"])
+@app.route(
+    "/telegram",
+    methods=["POST"],
+)
 def telegram_webhook():
-    update = request.get_json(silent=True) or {}
+    update = request.get_json(
+        silent=True
+    ) or {}
 
     message = update.get("message")
 
@@ -324,35 +491,63 @@ def telegram_webhook():
     if not chat_id:
         return "ok", 200
 
-    text = message.get("text", "")
+    text = message.get(
+        "text",
+        ""
+    )
+
     contact = message.get("contact")
 
-
-    # -----------------------------------------------------
-    # ПОЛЬЗОВАТЕЛЬ ОТПРАВИЛ ТЕЛЕФОН
-    # -----------------------------------------------------
+    # ---------- CONTACT ----------
 
     if contact:
-        phone = contact.get("phone_number", "")
+        phone = normalize_phone(
+            contact.get(
+                "phone_number",
+                "",
+            )
+        )
 
         send_message(
             chat_id,
-            "Ищу вас в базе Капитана Булька… 🦭",
-            main_keyboard(),
+            "Ищу вас в базе "
+            "Капитана Булька… 🦭",
         )
 
-        found, errors = find_client_everywhere(phone)
+        results, errors = (
+            find_client_everywhere(
+                phone
+            )
+        )
 
-        if found:
-            branches = "\n".join(
-                f"• {item['branch']}"
-                for item in found
+        if results:
+            branches = ", ".join(
+                item["branch"]
+                for item in results
+            )
+
+            names = [
+                item["client"].get(
+                    "name"
+                )
+                for item in results
+                if item["client"].get(
+                    "name"
+                )
+            ]
+
+            name = (
+                names[0]
+                if names
+                else "клиент"
             )
 
             send_message(
                 chat_id,
-                "Нашёл вас в YCLIENTS ✅\n\n"
-                f"Вы найдены в филиалах:\n{branches}",
+                f"Нашла 💙\n\n"
+                f"{name}, вы есть "
+                f"в нашей базе.\n"
+                f"Филиал: {branches}",
                 main_keyboard(),
             )
 
@@ -361,16 +556,16 @@ def telegram_webhook():
         if errors:
             error_text = "\n".join(
                 f"{branch}: {status}"
-                for branch, status in errors.items()
+                for branch, status
+                in errors
             )
 
             send_message(
                 chat_id,
-                "YCLIENTS пока не дал получить клиентскую базу.\n\n"
+                "YCLIENTS пока не дал "
+                "получить клиентскую базу.\n\n"
                 "Коды ответа:\n"
-                f"{error_text}\n\n"
-                "Пришлите мне этот экран — по коду сразу поймём, "
-                "что нужно поправить.",
+                f"{error_text}",
                 main_keyboard(),
             )
 
@@ -378,136 +573,131 @@ def telegram_webhook():
 
         send_message(
             chat_id,
-            "По этому номеру пока не нашёл клиента в YCLIENTS.",
+            "Не нашла этот номер "
+            "в клиентской базе.\n\n"
+            "Проверьте, что в Telegram "
+            "указан тот же номер, "
+            "который вы оставляли "
+            "при записи.",
             main_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # /START
-    # -----------------------------------------------------
+    # ---------- START ----------
 
     if text == "/start":
         send_message(
             chat_id,
             "Привет! 🦭\n"
-            "Я Капитан Бульк — ваш помощник 💙\n\n"
-            "Здесь можно записаться на занятие, "
-            "посмотреть свои записи и узнать информацию "
-            "об абонементе.",
+            "Я Капитан Бульк — "
+            "ваш помощник 💙\n\n"
+            "Здесь можно записаться "
+            "на занятие, посмотреть "
+            "свои записи и узнать "
+            "информацию об абонементе.",
             main_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # ЗАПИСАТЬСЯ
-    # -----------------------------------------------------
+    # ---------- BOOKING ----------
 
     if text == "🏊 Записаться":
         send_message(
             chat_id,
-            "Выберите филиал 👇",
+            "Выберите филиал:",
             branch_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # ВЫБОР ФИЛИАЛА
-    # -----------------------------------------------------
-
     if text in BRANCHES:
+        branch = BRANCHES[text]
+
         send_message(
             chat_id,
-            f"Вы выбрали филиал «{text}» 💙",
-            booking_button(text),
+            f"Вы выбрали филиал "
+            f"«{text}» 💙",
+            booking_button(
+                branch["booking_url"]
+            ),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # МОИ ЗАПИСИ
-    # -----------------------------------------------------
+    # ---------- MY RECORDS ----------
 
     if text == "📅 Мои записи":
         send_message(
             chat_id,
-            "Чтобы найти вас в YCLIENTS, "
-            "поделитесь номером телефона 👇",
+            "Чтобы найти ваши записи, "
+            "отправьте номер телефона, "
+            "который указан в YCLIENTS.",
             phone_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # МОЙ АБОНЕМЕНТ
-    # -----------------------------------------------------
+    # ---------- SUBSCRIPTION ----------
 
     if text == "🎟️ Мой абонемент":
         send_message(
             chat_id,
-            "Чтобы найти ваш абонемент в YCLIENTS, "
-            "поделитесь номером телефона 👇",
+            "Чтобы найти ваш абонемент, "
+            "отправьте номер телефона, "
+            "который указан в YCLIENTS.",
             phone_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # СВЯЗАТЬСЯ
-    # -----------------------------------------------------
+    # ---------- CONTACT US ----------
 
     if text == "💬 Связаться с нами":
         send_message(
             chat_id,
-            "Здесь скоро появятся контакты администратора 💙",
+            "Напишите нам, и "
+            "администратор поможет вам 💙",
             main_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # НАЗАД
-    # -----------------------------------------------------
+    # ---------- BACK ----------
 
     if text == "← Назад":
         send_message(
             chat_id,
-            "Выберите нужный раздел 👇",
+            "Главное меню 🦭",
             main_keyboard(),
         )
 
         return "ok", 200
 
-
-    # -----------------------------------------------------
-    # ЕСЛИ НЕ ПОНЯЛИ СООБЩЕНИЕ
-    # -----------------------------------------------------
-
     send_message(
         chat_id,
-        "Выберите нужный раздел 👇",
+        "Выберите нужный пункт "
+        "в меню 👇",
         main_keyboard(),
     )
 
     return "ok", 200
 
 
-# =========================================================
-# ЛОКАЛЬНЫЙ ЗАПУСК
-# =========================================================
+# =========================
+# ЗАПУСК
+# =========================
 
 if __name__ == "__main__":
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000,
+        )
+    )
+
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
+        port=port,
     )

@@ -7,6 +7,13 @@ app = Flask(__name__)
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+BRANCH_URLS = {
+    "Нагатинская": "https://n591306.yclients.ru",
+    "Беломорская": "https://n685581.yclients.ru",
+    "Базовская": "https://n629339.yclients.ru",
+    "Истринская": "https://n731690.yclients.ru",
+}
+
 
 MAIN_KEYBOARD = {
     "keyboard": [
@@ -37,17 +44,25 @@ BRANCH_KEYBOARD = {
 }
 
 
-def send_message(chat_id, text, keyboard=None):
-    if keyboard is None:
-        keyboard = MAIN_KEYBOARD
+def send_message(chat_id, text, keyboard=None, inline_keyboard=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    if inline_keyboard:
+        payload["reply_markup"] = {
+            "inline_keyboard": inline_keyboard
+        }
+    else:
+        if keyboard is None:
+            keyboard = MAIN_KEYBOARD
+
+        payload["reply_markup"] = keyboard
 
     requests.post(
         f"{TELEGRAM_API}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": text,
-            "reply_markup": keyboard
-        },
+        json=payload,
         timeout=10
     )
 
@@ -60,74 +75,84 @@ def home():
 @app.post("/telegram")
 def telegram_webhook():
     update = request.get_json(silent=True) or {}
-
     message = update.get("message")
 
-    if message:
-        chat_id = message["chat"]["id"]
-        text = message.get("text", "")
+    if not message:
+        return "ok", 200
 
-        if text == "/start":
-            send_message(
-                chat_id,
-                "Привет! 🦭\n"
-                "Я Капитан Бульк — ваш помощник 💙\n\n"
-                "Здесь можно записаться на занятие, "
-                "посмотреть свои записи и узнать "
-                "информацию об абонементе."
-            )
+    chat_id = message["chat"]["id"]
+    text = message.get("text", "")
 
-        elif text == "🏊 Записаться":
-            send_message(
-                chat_id,
-                "Выберите филиал 👇",
-                BRANCH_KEYBOARD
-            )
+    if text == "/start":
+        send_message(
+            chat_id,
+            "Привет! 🦭\n"
+            "Я Капитан Бульк — ваш помощник 💙\n\n"
+            "Здесь можно записаться на занятие, "
+            "посмотреть свои записи и узнать "
+            "информацию об абонементе."
+        )
 
-        elif text == "← Назад":
-            send_message(
-                chat_id,
-                "Главное меню 👇",
-                MAIN_KEYBOARD
-            )
+    elif text == "🏊 Записаться":
+        send_message(
+            chat_id,
+            "Выберите филиал 👇",
+            BRANCH_KEYBOARD
+        )
 
-        elif text in [
-            "📍 Нагатинская",
-            "📍 Беломорская",
-            "📍 Базовская",
-            "📍 Истринская"
-        ]:
-            branch = text.replace("📍 ", "")
+    elif text == "← Назад":
+        send_message(
+            chat_id,
+            "Главное меню 👇",
+            MAIN_KEYBOARD
+        )
 
+    elif text.startswith("📍 "):
+        branch = text.replace("📍 ", "")
+
+        if branch in BRANCH_URLS:
             send_message(
                 chat_id,
                 f"Вы выбрали филиал «{branch}» 🦭\n\n"
-                "Сейчас подключим запись через YCLIENTS.",
-                BRANCH_KEYBOARD
+                "Нажмите кнопку ниже, чтобы перейти к записи:",
+                inline_keyboard=[
+                    [
+                        {
+                            "text": f"🏊 Записаться — {branch}",
+                            "url": BRANCH_URLS[branch]
+                        }
+                    ]
+                ]
             )
-
-        elif text == "🎟 Мой абонемент":
-            send_message(
-                chat_id,
-                "Раздел «Мой абонемент» скоро подключим к YCLIENTS 🦭"
-            )
-
-        elif text == "📅 Мои записи":
-            send_message(
-                chat_id,
-                "Раздел «Мои записи» скоро подключим к YCLIENTS 🦭"
-            )
-
-        elif text == "💬 Связаться с нами":
-            send_message(
-                chat_id,
-                "Здесь мы добавим контакты «Капитана Булька» 💙"
-            )
-
         else:
             send_message(
                 chat_id,
-                "Выберите нужный раздел 👇"
+                "Не удалось найти этот филиал.",
+                BRANCH_KEYBOARD
             )
+
+    elif text == "🎟 Мой абонемент":
+        send_message(
+            chat_id,
+            "Скоро здесь можно будет посмотреть остаток занятий по абонементу 🦭"
+        )
+
+    elif text == "📅 Мои записи":
+        send_message(
+            chat_id,
+            "Скоро здесь будут отображаться ваши ближайшие записи 🦭"
+        )
+
+    elif text == "💬 Связаться с нами":
+        send_message(
+            chat_id,
+            "Здесь мы добавим контакты «Капитана Булька» 💙"
+        )
+
+    else:
+        send_message(
+            chat_id,
+            "Выберите нужный раздел 👇"
+        )
 
     return "ok", 200

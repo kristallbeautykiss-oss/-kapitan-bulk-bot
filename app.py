@@ -3,6 +3,7 @@ import re
 import requests
 
 from datetime import date, timedelta, datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, request
 
 
@@ -13,24 +14,44 @@ app = Flask(__name__)
 # НАСТРОЙКИ
 # =========================================================
 
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"].strip()
 
-YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"]
-YCLIENTS_PARTNER_TOKEN = os.environ["YCLIENTS_PARTNER_TOKEN"]
+YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"].strip()
+YCLIENTS_PARTNER_TOKEN = os.environ["YCLIENTS_PARTNER_TOKEN"].strip()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"]
+SUPABASE_URL = os.environ["SUPABASE_URL"].strip()
+SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"].strip()
+
+# Добавим в Render следующим шагом.
+# Пока код запустится и без него,
+# но автоматическая проверка напоминаний будет выключена.
+REMINDER_SECRET = os.environ.get(
+    "REMINDER_SECRET",
+    "",
+).strip()
 
 
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+TELEGRAM_API = (
+    f"https://api.telegram.org/bot{BOT_TOKEN}"
+)
 
-YCLIENTS_API = "https://api.yclients.ru/api/v1"
-YCLIENTS_MARKETPLACE_API = "https://api.yclients.ru"
+YCLIENTS_API = (
+    "https://api.yclients.ru/api/v1"
+)
+
+YCLIENTS_MARKETPLACE_API = (
+    "https://api.yclients.ru"
+)
 
 APPLICATION_ID = 51162
 
 YCLIENTS_WEBHOOK_URL = (
-    "https://kapitan-bulk-bot.onrender.com/yclients/webhook"
+    "https://kapitan-bulk-bot.onrender.com/"
+    "yclients/webhook"
+)
+
+MOSCOW_TZ = ZoneInfo(
+    "Europe/Moscow"
 )
 
 
@@ -41,32 +62,48 @@ YCLIENTS_WEBHOOK_URL = (
 BRANCHES = {
     "Нагатинская": {
         "company_id": 558795,
-        "booking_url": "https://n591306.yclients.ru",
-        "address": "Нагатинская, 16",
+        "booking_url":
+            "https://n591306.yclients.ru",
+        "address":
+            "Нагатинская, 16",
+        "admin":
+            "@Bulk_nagatinskaya",
     },
 
     "Беломорская": {
         "company_id": 647846,
-        "booking_url": "https://n685581.yclients.ru",
-        "address": "Беломорская, 9",
+        "booking_url":
+            "https://n685581.yclients.ru",
+        "address":
+            "Беломорская, 9",
+        "admin":
+            "@Bulk_levoberezhny",
     },
 
     "Базовская": {
         "company_id": 594760,
-        "booking_url": "https://n629339.yclients.ru",
-        "address": "Базовская, 15А",
+        "booking_url":
+            "https://n629339.yclients.ru",
+        "address":
+            "Базовская, 15А",
+        "admin":
+            "@Bulk_hovrino",
     },
 
     "Истринская": {
         "company_id": 689709,
-        "booking_url": "https://n731690.yclients.ru",
-        "address": "Истринская, 5",
+        "booking_url":
+            "https://n731690.yclients.ru",
+        "address":
+            "Истринская, 5",
+        "admin":
+            "@Bulk_molodezhnaia",
     },
 }
 
 
 # =========================================================
-# ВРЕМЕННОЕ СОСТОЯНИЕ ДИАЛОГА
+# ВРЕМЕННОЕ СОСТОЯНИЕ
 # =========================================================
 
 PENDING_ACTIONS = {}
@@ -76,7 +113,11 @@ PENDING_ACTIONS = {}
 # TELEGRAM
 # =========================================================
 
-def send_message(chat_id, text, reply_markup=None):
+def send_message(
+    chat_id,
+    text,
+    reply_markup=None,
+):
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -89,7 +130,7 @@ def send_message(chat_id, text, reply_markup=None):
         response = requests.post(
             f"{TELEGRAM_API}/sendMessage",
             json=payload,
-            timeout=20,
+            timeout=30,
         )
 
         print(
@@ -98,23 +139,105 @@ def send_message(chat_id, text, reply_markup=None):
             response.text[:500],
         )
 
-    except Exception as e:
-        print("TELEGRAM SEND ERROR:", e)
+        return response
 
+    except Exception as e:
+        print(
+            "TELEGRAM SEND ERROR:",
+            e,
+        )
+
+        return None
+
+
+def answer_callback(
+    callback_query_id,
+    text=None,
+    show_alert=False,
+):
+    payload = {
+        "callback_query_id":
+            callback_query_id,
+        "show_alert":
+            show_alert,
+    }
+
+    if text:
+        payload["text"] = text
+
+    try:
+        requests.post(
+            f"{TELEGRAM_API}/answerCallbackQuery",
+            json=payload,
+            timeout=20,
+        )
+
+    except Exception as e:
+        print(
+            "ANSWER CALLBACK ERROR:",
+            e,
+        )
+
+
+def edit_message_buttons(
+    chat_id,
+    message_id,
+    reply_markup=None,
+):
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "reply_markup":
+            reply_markup
+            or {"inline_keyboard": []},
+    }
+
+    try:
+        requests.post(
+            f"{TELEGRAM_API}/editMessageReplyMarkup",
+            json=payload,
+            timeout=20,
+        )
+
+    except Exception as e:
+        print(
+            "EDIT BUTTONS ERROR:",
+            e,
+        )
+
+
+# =========================================================
+# КЛАВИАТУРЫ
+# =========================================================
 
 def main_keyboard():
     return {
         "keyboard": [
             [
-                {"text": "🏊 Записаться"},
-                {"text": "🎟️ Мой абонемент"},
+                {
+                    "text":
+                        "🏊 Записаться"
+                },
+                {
+                    "text":
+                        "🎟️ Мой абонемент"
+                },
             ],
             [
-                {"text": "📅 Мои записи"},
-                {"text": "⚙️ Мои данные"},
+                {
+                    "text":
+                        "📅 Мои записи"
+                },
+                {
+                    "text":
+                        "⚙️ Мои данные"
+                },
             ],
             [
-                {"text": "💬 Связаться с нами"},
+                {
+                    "text":
+                        "💬 Связаться с нами"
+                },
             ],
         ],
         "resize_keyboard": True,
@@ -125,15 +248,30 @@ def branch_keyboard():
     return {
         "keyboard": [
             [
-                {"text": "Нагатинская"},
-                {"text": "Беломорская"},
+                {
+                    "text":
+                        "Нагатинская"
+                },
+                {
+                    "text":
+                        "Беломорская"
+                },
             ],
             [
-                {"text": "Базовская"},
-                {"text": "Истринская"},
+                {
+                    "text":
+                        "Базовская"
+                },
+                {
+                    "text":
+                        "Истринская"
+                },
             ],
             [
-                {"text": "← Назад"},
+                {
+                    "text":
+                        "← Назад"
+                },
             ],
         ],
         "resize_keyboard": True,
@@ -145,12 +283,17 @@ def phone_keyboard():
         "keyboard": [
             [
                 {
-                    "text": "📱 Отправить мой номер",
-                    "request_contact": True,
+                    "text":
+                        "📱 Отправить мой номер",
+                    "request_contact":
+                        True,
                 }
             ],
             [
-                {"text": "← Назад"},
+                {
+                    "text":
+                        "← Назад"
+                }
             ],
         ],
         "resize_keyboard": True,
@@ -162,10 +305,16 @@ def user_data_keyboard():
     return {
         "keyboard": [
             [
-                {"text": "📱 Изменить номер"},
+                {
+                    "text":
+                        "📱 Изменить номер"
+                },
             ],
             [
-                {"text": "← Назад"},
+                {
+                    "text":
+                        "← Назад"
+                },
             ],
         ],
         "resize_keyboard": True,
@@ -177,10 +326,74 @@ def booking_button(url):
         "inline_keyboard": [
             [
                 {
-                    "text": "Записаться онлайн",
-                    "url": url,
+                    "text":
+                        "Записаться онлайн",
+                    "url":
+                        url,
                 }
             ]
+        ]
+    }
+
+
+def reminder_buttons(
+    company_id,
+    record_id,
+    already_confirmed=False,
+):
+    buttons = []
+
+    if not already_confirmed:
+        buttons.append(
+            [
+                {
+                    "text":
+                        "✅ Подтвердить запись",
+                    "callback_data":
+                        f"confirm:{company_id}:{record_id}",
+                }
+            ]
+        )
+
+    buttons.append(
+        [
+            {
+                "text":
+                    "❌ Отменить занятие",
+                "callback_data":
+                    f"cancel:{company_id}:{record_id}",
+            }
+        ]
+    )
+
+    return {
+        "inline_keyboard":
+            buttons
+    }
+
+
+def confirm_cancel_buttons(
+    company_id,
+    record_id,
+):
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text":
+                        "Да, отменить",
+                    "callback_data":
+                        f"cancel_yes:{company_id}:{record_id}",
+                }
+            ],
+            [
+                {
+                    "text":
+                        "Нет, оставить запись",
+                    "callback_data":
+                        f"cancel_no:{company_id}:{record_id}",
+                }
+            ],
         ]
     }
 
@@ -196,20 +409,34 @@ def normalize_phone(phone):
         phone or "",
     )
 
-    if len(digits) == 11 and digits.startswith("8"):
-        digits = "7" + digits[1:]
+    if (
+        len(digits) == 11
+        and digits.startswith("8")
+    ):
+        digits = (
+            "7"
+            + digits[1:]
+        )
 
     if len(digits) == 10:
-        digits = "7" + digits
+        digits = (
+            "7"
+            + digits
+        )
 
     return digits
 
 
 def masked_phone(phone):
-    phone = normalize_phone(phone)
+    phone = normalize_phone(
+        phone
+    )
 
-    if len(phone) >= 4:
-        return f"+7 ••• ••• •• {phone[-2:]}"
+    if len(phone) >= 2:
+        return (
+            "+7 ••• ••• •• "
+            f"{phone[-2:]}"
+        )
 
     return "номер сохранён"
 
@@ -219,42 +446,67 @@ def masked_phone(phone):
 # =========================================================
 
 def supabase_base_url():
-    url = SUPABASE_URL.rstrip("/")
+    url = (
+        SUPABASE_URL
+        .strip()
+        .rstrip("/")
+    )
 
-    if url.endswith("/rest/v1"):
+    if url.endswith(
+        "/rest/v1"
+    ):
         return url
 
-    return f"{url}/rest/v1"
+    return (
+        f"{url}/rest/v1"
+    )
 
 
-def supabase_headers(prefer=None):
+def supabase_headers(
+    prefer=None,
+):
     headers = {
-        "apikey": SUPABASE_SECRET_KEY,
-        "Content-Type": "application/json",
+        "apikey":
+            SUPABASE_SECRET_KEY.strip(),
+
+        "Content-Type":
+            "application/json",
     }
 
     if prefer:
-        headers["Prefer"] = prefer
+        headers[
+            "Prefer"
+        ] = prefer
 
     return headers
 
 
+# =========================================================
+# SUPABASE — TELEGRAM USERS
+# =========================================================
+
 def get_saved_user(chat_id):
     url = (
         f"{supabase_base_url()}"
-        f"/telegram_users"
+        "/telegram_users"
     )
 
     params = {
-        "chat_id": f"eq.{chat_id}",
-        "select": "chat_id,phone,name,created_at",
-        "limit": 1,
+        "chat_id":
+            f"eq.{chat_id}",
+
+        "select":
+            "chat_id,phone,name,created_at",
+
+        "limit":
+            1,
     }
 
     try:
         response = requests.get(
             url,
-            headers=supabase_headers(),
+            headers=
+                supabase_headers(),
             params=params,
             timeout=20,
         )
@@ -270,13 +522,13 @@ def get_saved_user(chat_id):
 
         data = response.json()
 
-        if not isinstance(data, list):
-            return None
+        if (
+            isinstance(data, list)
+            and data
+        ):
+            return data[0]
 
-        if not data:
-            return None
-
-        return data[0]
+        return None
 
     except Exception as e:
         print(
@@ -287,27 +539,91 @@ def get_saved_user(chat_id):
         return None
 
 
-def save_user(chat_id, phone, name=None):
+def get_all_saved_users():
     url = (
         f"{supabase_base_url()}"
-        f"/telegram_users"
+        "/telegram_users"
+    )
+
+    params = {
+        "select":
+            "chat_id,phone,name",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=
+                supabase_headers(),
+            params=params,
+            timeout=30,
+        )
+
+        print(
+            "SUPABASE ALL USERS:",
+            response.status_code,
+        )
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+
+        if isinstance(
+            data,
+            list,
+        ):
+            return data
+
+        return []
+
+    except Exception as e:
+        print(
+            "SUPABASE ALL USERS ERROR:",
+            e,
+        )
+
+        return []
+
+
+def save_user(
+    chat_id,
+    phone,
+    name=None,
+):
+    url = (
+        f"{supabase_base_url()}"
+        "/telegram_users"
     )
 
     payload = {
-        "chat_id": int(chat_id),
-        "phone": normalize_phone(phone),
-        "name": name or None,
+        "chat_id":
+            int(chat_id),
+
+        "phone":
+            normalize_phone(
+                phone
+            ),
+
+        "name":
+            name or None,
     }
 
     try:
         response = requests.post(
             url,
-            headers=supabase_headers(
-                "resolution=merge-duplicates,return=representation"
-            ),
+
+            headers=
+                supabase_headers(
+                    "resolution=merge-duplicates,"
+                    "return=representation"
+                ),
+
             params={
-                "on_conflict": "chat_id",
+                "on_conflict":
+                    "chat_id"
             },
+
             json=payload,
             timeout=20,
         )
@@ -318,9 +634,12 @@ def save_user(chat_id, phone, name=None):
             response.text[:700],
         )
 
-        return response.status_code in (
-            200,
-            201,
+        return (
+            response.status_code
+            in (
+                200,
+                201,
+            )
         )
 
     except Exception as e:
@@ -333,78 +652,252 @@ def save_user(chat_id, phone, name=None):
 
 
 # =========================================================
-# YCLIENTS — ЗАГОЛОВКИ
+# SUPABASE — REMINDERS
+# =========================================================
+
+def get_reminder_row(
+    company_id,
+    record_id,
+):
+    url = (
+        f"{supabase_base_url()}"
+        "/appointment_reminders"
+    )
+
+    params = {
+        "company_id":
+            f"eq.{company_id}",
+
+        "record_id":
+            f"eq.{record_id}",
+
+        "select":
+            "*",
+
+        "limit":
+            1,
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=
+                supabase_headers(),
+            params=params,
+            timeout=20,
+        )
+
+        if response.status_code != 200:
+            print(
+                "GET REMINDER ERROR:",
+                response.status_code,
+                response.text[:500],
+            )
+            return None
+
+        data = response.json()
+
+        if (
+            isinstance(data, list)
+            and data
+        ):
+            return data[0]
+
+        return None
+
+    except Exception as e:
+        print(
+            "GET REMINDER EXCEPTION:",
+            e,
+        )
+
+        return None
+
+
+def create_reminder_row(
+    company_id,
+    record_id,
+    chat_id,
+    record_datetime_value,
+    reminder_sent=True,
+    confirmed=False,
+):
+    url = (
+        f"{supabase_base_url()}"
+        "/appointment_reminders"
+    )
+
+    # В созданной нами таблице id не автоинкрементный.
+    # Поэтому используем ID самой записи YCLIENTS.
+    payload = {
+        "id":
+            int(record_id),
+
+        "record_id":
+            int(record_id),
+
+        "company_id":
+            int(company_id),
+
+        "chat_id":
+            int(chat_id),
+
+        "record_datetime":
+            record_datetime_value,
+
+        "reminder_sent":
+            bool(reminder_sent),
+
+        "confirmed":
+            bool(confirmed),
+
+        "cancelled":
+            False,
+    }
+
+    try:
+        response = requests.post(
+            url,
+            headers=
+                supabase_headers(
+                    "return=representation"
+                ),
+            json=payload,
+            timeout=20,
+        )
+
+        print(
+            "CREATE REMINDER:",
+            response.status_code,
+            response.text[:700],
+        )
+
+        return (
+            response.status_code
+            in (
+                200,
+                201,
+            )
+        )
+
+    except Exception as e:
+        print(
+            "CREATE REMINDER ERROR:",
+            e,
+        )
+
+        return False
+
+
+def update_reminder_row(
+    company_id,
+    record_id,
+    fields,
+):
+    url = (
+        f"{supabase_base_url()}"
+        "/appointment_reminders"
+    )
+
+    params = {
+        "company_id":
+            f"eq.{company_id}",
+
+        "record_id":
+            f"eq.{record_id}",
+    }
+
+    try:
+        response = requests.patch(
+            url,
+            headers=
+                supabase_headers(
+                    "return=representation"
+                ),
+            params=params,
+            json=fields,
+            timeout=20,
+        )
+
+        print(
+            "UPDATE REMINDER:",
+            response.status_code,
+            response.text[:500],
+        )
+
+        return (
+            response.status_code
+            in (
+                200,
+                204,
+            )
+        )
+
+    except Exception as e:
+        print(
+            "UPDATE REMINDER ERROR:",
+            e,
+        )
+
+        return False
+
+
+# =========================================================
+# YCLIENTS HEADERS
 # =========================================================
 
 def yclients_user_headers():
     return {
         "Authorization": (
-            f"Bearer {YCLIENTS_PARTNER_TOKEN}, "
-            f"User {YCLIENTS_USER_TOKEN}"
+            f"Bearer "
+            f"{YCLIENTS_PARTNER_TOKEN}, "
+            f"User "
+            f"{YCLIENTS_USER_TOKEN}"
         ),
-        "Accept": "application/vnd.yclients.v2+json",
-        "Content-Type": "application/json",
+
+        "Accept":
+            "application/vnd.yclients.v2+json",
+
+        "Content-Type":
+            "application/json",
     }
 
 
 def yclients_partner_headers():
     return {
-        "Authorization": (
-            f"Bearer {YCLIENTS_PARTNER_TOKEN}"
-        ),
-        "Accept": "application/json",
-        "Content-Type": "application/json",
+        "Authorization":
+            f"Bearer "
+            f"{YCLIENTS_PARTNER_TOKEN}",
+
+        "Accept":
+            "application/json",
+
+        "Content-Type":
+            "application/json",
     }
-
-
-# =========================================================
-# YCLIENTS — АКТИВАЦИЯ
-# =========================================================
-
-def activate_yclients_branch(salon_id):
-    url = (
-        f"{YCLIENTS_MARKETPLACE_API}"
-        f"/marketplace/partner/callback"
-    )
-
-    payload = {
-        "salon_id": int(salon_id),
-        "application_id": APPLICATION_ID,
-        "webhook_urls": [
-            YCLIENTS_WEBHOOK_URL
-        ],
-    }
-
-    response = requests.post(
-        url,
-        headers=yclients_partner_headers(),
-        json=payload,
-        timeout=30,
-    )
-
-    print(
-        "YCLIENTS ACTIVATION:",
-        salon_id,
-        response.status_code,
-        response.text[:1000],
-    )
-
-    return response
 
 
 # =========================================================
 # YCLIENTS — ПОИСК КЛИЕНТА
 # =========================================================
 
-def search_client_in_branch(company_id, phone):
+def search_client_in_branch(
+    company_id,
+    phone,
+):
     url = (
         f"{YCLIENTS_API}"
-        f"/company/{company_id}/clients/search"
+        f"/company/"
+        f"{company_id}"
+        f"/clients/search"
     )
 
     payload = {
-        "page": 1,
-        "page_size": 10,
+        "page":
+            1,
+
+        "page_size":
+            10,
 
         "fields": [
             "id",
@@ -412,13 +905,17 @@ def search_client_in_branch(company_id, phone):
             "phone",
         ],
 
-        "operation": "AND",
+        "operation":
+            "AND",
 
         "filters": [
             {
-                "type": "quick_search",
+                "type":
+                    "quick_search",
+
                 "state": {
-                    "value": phone
+                    "value":
+                        phone
                 },
             }
         ],
@@ -427,7 +924,8 @@ def search_client_in_branch(company_id, phone):
     try:
         response = requests.post(
             url,
-            headers=yclients_user_headers(),
+            headers=
+                yclients_user_headers(),
             json=payload,
             timeout=30,
         )
@@ -436,14 +934,19 @@ def search_client_in_branch(company_id, phone):
             "CLIENT SEARCH:",
             company_id,
             response.status_code,
-            response.text[:700],
+            response.text[:500],
         )
 
         if response.status_code != 200:
             return {
-                "ok": False,
-                "status": response.status_code,
-                "clients": [],
+                "ok":
+                    False,
+
+                "status":
+                    response.status_code,
+
+                "clients":
+                    [],
             }
 
         data = response.json()
@@ -458,8 +961,12 @@ def search_client_in_branch(company_id, phone):
             dict,
         ):
             clients = (
-                clients.get("clients")
-                or clients.get("items")
+                clients.get(
+                    "clients"
+                )
+                or clients.get(
+                    "items"
+                )
                 or []
             )
 
@@ -470,40 +977,52 @@ def search_client_in_branch(company_id, phone):
             clients = []
 
         return {
-            "ok": True,
-            "status": 200,
-            "clients": clients,
+            "ok":
+                True,
+
+            "status":
+                200,
+
+            "clients":
+                clients,
         }
 
     except Exception as e:
         print(
-            "YCLIENTS CLIENT SEARCH ERROR:",
+            "CLIENT SEARCH ERROR:",
             company_id,
             e,
         )
 
         return {
-            "ok": False,
-            "status": "error",
-            "clients": [],
+            "ok":
+                False,
+
+            "status":
+                "error",
+
+            "clients":
+                [],
         }
 
 
-def find_client_everywhere(phone):
+def find_client_everywhere(
+    phone,
+):
     results = []
     errors = []
 
-    normalized_phone = normalize_phone(
+    phone = normalize_phone(
         phone
     )
 
     for (
         branch_name,
-        branch_data,
+        branch,
     ) in BRANCHES.items():
 
         company_id = (
-            branch_data[
+            branch[
                 "company_id"
             ]
         )
@@ -511,7 +1030,7 @@ def find_client_everywhere(phone):
         result = (
             search_client_in_branch(
                 company_id,
-                normalized_phone,
+                phone,
             )
         )
 
@@ -524,8 +1043,9 @@ def find_client_everywhere(phone):
             )
             continue
 
-        for client in result["clients"]:
-
+        for client in result[
+            "clients"
+        ]:
             client_phone = (
                 normalize_phone(
                     str(
@@ -537,30 +1057,38 @@ def find_client_everywhere(phone):
                 )
             )
 
-            if (
-                client_phone
-                == normalized_phone
-            ):
+            if client_phone == phone:
                 results.append(
                     {
-                        "branch": branch_name,
-                        "company_id": company_id,
-                        "client": client,
+                        "branch":
+                            branch_name,
+
+                        "company_id":
+                            company_id,
+
+                        "client":
+                            client,
                     }
                 )
 
-    return results, errors
+    return (
+        results,
+        errors,
+    )
 
 
-def get_client_name(client_results):
-    for item in client_results:
-        client = item.get(
-            "client",
-            {},
-        )
-
-        name = client.get(
-            "name"
+def get_client_name(
+    clients,
+):
+    for item in clients:
+        name = (
+            item.get(
+                "client",
+                {},
+            )
+            .get(
+                "name"
+            )
         )
 
         if name:
@@ -579,10 +1107,17 @@ def get_client_records(
 ):
     url = (
         f"{YCLIENTS_API}"
-        f"/records/{company_id}"
+        f"/records/"
+        f"{company_id}"
     )
 
-    today = date.today()
+    today = (
+        datetime
+        .now(
+            MOSCOW_TZ
+        )
+        .date()
+    )
 
     end_day = (
         today
@@ -592,21 +1127,27 @@ def get_client_records(
     )
 
     params = {
-        "page": 1,
-        "count": 100,
-        "client_id": client_id,
-        "start_date": (
-            today.isoformat()
-        ),
-        "end_date": (
-            end_day.isoformat()
-        ),
+        "page":
+            1,
+
+        "count":
+            100,
+
+        "client_id":
+            client_id,
+
+        "start_date":
+            today.isoformat(),
+
+        "end_date":
+            end_day.isoformat(),
     }
 
     try:
         response = requests.get(
             url,
-            headers=yclients_user_headers(),
+            headers=
+                yclients_user_headers(),
             params=params,
             timeout=30,
         )
@@ -616,14 +1157,19 @@ def get_client_records(
             company_id,
             client_id,
             response.status_code,
-            response.text[:1500],
+            response.text[:1000],
         )
 
         if response.status_code != 200:
             return {
-                "ok": False,
-                "status": response.status_code,
-                "records": [],
+                "ok":
+                    False,
+
+                "status":
+                    response.status_code,
+
+                "records":
+                    [],
             }
 
         data = response.json()
@@ -638,8 +1184,12 @@ def get_client_records(
             dict,
         ):
             records = (
-                records.get("records")
-                or records.get("items")
+                records.get(
+                    "records"
+                )
+                or records.get(
+                    "items"
+                )
                 or []
             )
 
@@ -650,34 +1200,193 @@ def get_client_records(
             records = []
 
         return {
-            "ok": True,
-            "status": 200,
-            "records": records,
+            "ok":
+                True,
+
+            "status":
+                200,
+
+            "records":
+                records,
         }
 
     except Exception as e:
         print(
-            "YCLIENTS RECORD SEARCH ERROR:",
-            company_id,
-            client_id,
+            "RECORD SEARCH ERROR:",
             e,
         )
 
         return {
-            "ok": False,
-            "status": "error",
-            "records": [],
+            "ok":
+                False,
+
+            "status":
+                "error",
+
+            "records":
+                [],
         }
 
 
+def get_record(
+    company_id,
+    record_id,
+):
+    url = (
+        f"{YCLIENTS_API}"
+        f"/record/"
+        f"{company_id}/"
+        f"{record_id}"
+    )
+
+    try:
+        response = requests.get(
+            url,
+            headers=
+                yclients_user_headers(),
+            timeout=30,
+        )
+
+        print(
+            "GET RECORD:",
+            response.status_code,
+            response.text[:800],
+        )
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+
+        record = data.get(
+            "data"
+        )
+
+        if isinstance(
+            record,
+            dict,
+        ):
+            return record
+
+        return None
+
+    except Exception as e:
+        print(
+            "GET RECORD ERROR:",
+            e,
+        )
+
+        return None
+
+
+def confirm_yclients_record(
+    company_id,
+    record_id,
+):
+    url = (
+        f"{YCLIENTS_API}"
+        f"/record/"
+        f"{company_id}/"
+        f"{record_id}"
+    )
+
+    try:
+        response = requests.put(
+            url,
+            headers=
+                yclients_user_headers(),
+
+            json={
+                "confirmed":
+                    1
+            },
+
+            timeout=30,
+        )
+
+        print(
+            "CONFIRM RECORD:",
+            company_id,
+            record_id,
+            response.status_code,
+            response.text[:800],
+        )
+
+        return (
+            response.status_code
+            in (
+                200,
+                201,
+            )
+        )
+
+    except Exception as e:
+        print(
+            "CONFIRM RECORD ERROR:",
+            e,
+        )
+
+        return False
+
+
+def delete_yclients_record(
+    company_id,
+    record_id,
+):
+    url = (
+        f"{YCLIENTS_API}"
+        f"/record/"
+        f"{company_id}/"
+        f"{record_id}"
+    )
+
+    try:
+        response = requests.delete(
+            url,
+            headers=
+                yclients_user_headers(),
+            timeout=30,
+        )
+
+        print(
+            "DELETE RECORD:",
+            company_id,
+            record_id,
+            response.status_code,
+            response.text[:800],
+        )
+
+        return (
+            response.status_code
+            in (
+                200,
+                204,
+            )
+        )
+
+    except Exception as e:
+        print(
+            "DELETE RECORD ERROR:",
+            e,
+        )
+
+        return False
+
+
 # =========================================================
-# ДАТА ЗАПИСИ
+# ДАТА И ВРЕМЯ
 # =========================================================
 
-def record_datetime(record):
+def record_datetime(
+    record,
+):
     value = (
-        record.get("datetime")
-        or record.get("date")
+        record.get(
+            "datetime"
+        )
+        or record.get(
+            "date"
+        )
         or ""
     )
 
@@ -685,7 +1394,7 @@ def record_datetime(record):
         return None
 
     try:
-        clean_value = (
+        value = (
             str(value)
             .replace(
                 "Z",
@@ -693,36 +1402,59 @@ def record_datetime(record):
             )
         )
 
-        return (
-            datetime.fromisoformat(
-                clean_value
+        dt = (
+            datetime
+            .fromisoformat(
+                value
             )
         )
 
-    except Exception:
+        if dt.tzinfo is None:
+            dt = dt.replace(
+                tzinfo=
+                    MOSCOW_TZ
+            )
+
+        return dt.astimezone(
+            MOSCOW_TZ
+        )
+
+    except Exception as e:
+        print(
+            "DATETIME PARSE ERROR:",
+            value,
+            e,
+        )
+
         return None
 
 
-def record_sort_value(record):
+def hours_until_record(
+    record,
+):
     dt = record_datetime(
         record
     )
 
     if not dt:
-        return float("inf")
+        return None
 
-    try:
-        return dt.timestamp()
+    now = datetime.now(
+        MOSCOW_TZ
+    )
 
-    except Exception:
-        return float("inf")
+    seconds = (
+        dt - now
+    ).total_seconds()
+
+    return (
+        seconds / 3600
+    )
 
 
-# =========================================================
-# ДЛИТЕЛЬНОСТЬ
-# =========================================================
-
-def format_duration(record):
+def format_duration(
+    record,
+):
     seconds = record.get(
         "length"
     )
@@ -755,31 +1487,91 @@ def format_duration(record):
         seconds / 60
     )
 
-    hours, minutes_left = (
-        divmod(
-            minutes,
-            60,
-        )
+    hours, mins = divmod(
+        minutes,
+        60,
     )
 
-    if (
-        hours
-        and minutes_left
-    ):
+    if hours and mins:
         return (
             f"{hours} ч "
-            f"{minutes_left} мин"
+            f"{mins} мин"
         )
 
     if hours:
-        return f"{hours} ч"
+        return (
+            f"{hours} ч"
+        )
 
-    return f"{minutes_left} мин"
+    return (
+        f"{mins} мин"
+    )
+
+
+# =========================================================
+# ФИЛИАЛ ПО COMPANY ID
+# =========================================================
+
+def branch_name_by_company_id(
+    company_id,
+):
+    company_id = int(
+        company_id
+    )
+
+    for (
+        name,
+        branch,
+    ) in BRANCHES.items():
+
+        if (
+            int(
+                branch[
+                    "company_id"
+                ]
+            )
+            == company_id
+        ):
+            return name
+
+    return None
 
 
 # =========================================================
 # КАРТОЧКА ЗАПИСИ
 # =========================================================
+
+def get_staff_name(
+    record,
+):
+    staff = (
+        record.get(
+            "staff"
+        )
+        or {}
+    )
+
+    if isinstance(
+        staff,
+        dict,
+    ):
+        return (
+            staff.get(
+                "name"
+            )
+            or staff.get(
+                "title"
+            )
+            or "не указан"
+        )
+
+    if staff:
+        return str(
+            staff
+        )
+
+    return "не указан"
+
 
 def format_record(
     record,
@@ -790,58 +1582,16 @@ def format_record(
     )
 
     if dt:
-        date_text = (
+        when = (
             dt.strftime(
-                "%d.%m.%Y"
-            )
-        )
-
-        time_text = (
-            dt.strftime(
-                "%H:%M"
+                "%d.%m.%Y в %H:%M"
             )
         )
 
     else:
-        date_text = (
-            str(
-                record.get(
-                    "date",
-                    "",
-                )
-            )
-            or "дата не указана"
+        when = (
+            "дата не указана"
         )
-
-        time_text = ""
-
-    staff = (
-        record.get("staff")
-        or {}
-    )
-
-    if isinstance(
-        staff,
-        dict,
-    ):
-        staff_name = (
-            staff.get("name")
-            or staff.get("title")
-            or "не указан"
-        )
-
-    else:
-        staff_name = (
-            str(staff)
-            if staff
-            else "не указан"
-        )
-
-    duration_text = (
-        format_duration(
-            record
-        )
-    )
 
     address = (
         BRANCHES
@@ -855,107 +1605,161 @@ def format_record(
         )
     )
 
-    if time_text:
-        when = (
-            f"{date_text} "
-            f"в {time_text}"
-        )
-
-    else:
-        when = date_text
-
     return (
         "📅 Ваша запись\n\n"
         f"🗓 {when}\n"
         "🏊 Индивидуальная тренировка\n"
-        f"👤 Тренер: {staff_name}\n"
-        f"⏱ Длительность: {duration_text}\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
+        f"⏱ Длительность: "
+        f"{format_duration(record)}\n"
         f"📍 {address}"
     )
 
 
+def format_reminder(
+    record,
+    branch_name,
+):
+    dt = record_datetime(
+        record
+    )
+
+    if dt:
+        when = (
+            dt.strftime(
+                "%d.%m.%Y в %H:%M"
+            )
+        )
+
+    else:
+        when = (
+            "время не указано"
+        )
+
+    branch = BRANCHES.get(
+        branch_name,
+        {},
+    )
+
+    address = branch.get(
+        "address",
+        branch_name,
+    )
+
+    return (
+        "🦭 Напоминание от "
+        "Капитана Булька!\n\n"
+        "Ждём вас на занятии 💙\n\n"
+        f"🗓 {when}\n"
+        "🏊 Индивидуальная тренировка\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
+        f"⏱ Длительность: "
+        f"{format_duration(record)}\n"
+        f"📍 {address}\n\n"
+        "Пожалуйста, подтвердите запись."
+    )
+
+
 # =========================================================
-# СОБИРАЕМ БУДУЩИЕ ЗАПИСИ
+# БУДУЩИЕ ЗАПИСИ
 # =========================================================
 
 def get_future_records_for_clients(
-    client_results,
+    clients,
 ):
     all_records = []
     errors = []
 
-    for item in client_results:
+    now = datetime.now(
+        MOSCOW_TZ
+    )
 
-        branch_name = (
-            item["branch"]
-        )
+    for item in clients:
+        branch_name = item[
+            "branch"
+        ]
 
-        company_id = (
-            item["company_id"]
-        )
-
-        client = (
-            item["client"]
-        )
+        company_id = item[
+            "company_id"
+        ]
 
         client_id = (
-            client.get("id")
+            item[
+                "client"
+            ]
+            .get(
+                "id"
+            )
         )
 
         if not client_id:
             continue
 
-        result = (
-            get_client_records(
-                company_id,
-                client_id,
-            )
+        result = get_client_records(
+            company_id,
+            client_id,
         )
 
-        if not result["ok"]:
+        if not result[
+            "ok"
+        ]:
             errors.append(
                 (
                     branch_name,
-                    result["status"],
+                    result[
+                        "status"
+                    ],
                 )
             )
             continue
 
-        for record in result["records"]:
+        for record in result[
+            "records"
+        ]:
 
             if record.get(
                 "deleted"
-            ) is True:
+            ):
                 continue
 
             dt = record_datetime(
                 record
             )
 
-            if dt:
-                try:
-                    if (
-                        dt.date()
-                        < date.today()
-                    ):
-                        continue
-
-                except Exception:
-                    pass
+            if (
+                dt
+                and dt < now
+            ):
+                continue
 
             all_records.append(
                 {
-                    "branch": branch_name,
-                    "record": record,
+                    "branch":
+                        branch_name,
+
+                    "company_id":
+                        company_id,
+
+                    "record":
+                        record,
                 }
             )
 
     all_records.sort(
-        key=lambda item: (
-            record_sort_value(
-                item["record"]
+        key=lambda item:
+            (
+                record_datetime(
+                    item[
+                        "record"
+                    ]
+                )
+                or datetime.max.replace(
+                    tzinfo=
+                        MOSCOW_TZ
+                )
             )
-        )
     )
 
     return (
@@ -985,108 +1789,28 @@ def show_records(
     )
 
     if not clients:
-
-        if client_errors:
-
-            error_text = "\n".join(
-                (
-                    f"{branch}: "
-                    f"{status}"
-                )
-                for (
-                    branch,
-                    status,
-                )
-                in client_errors
-            )
-
-            send_message(
-                chat_id,
-                "Не удалось получить "
-                "данные из YCLIENTS.\n\n"
-                "Коды ответа:\n"
-                f"{error_text}",
-                main_keyboard(),
-            )
-
-        else:
-
-            send_message(
-                chat_id,
-                "Не нашла этот номер "
-                "в клиентской базе.\n\n"
-                "Если номер изменился, "
-                "откройте «⚙️ Мои данные» "
-                "и привяжите новый.",
-                main_keyboard(),
-            )
-
-        return
-
-    records, record_errors = (
-        get_future_records_for_clients(
-            clients
-        )
-    )
-
-    if records:
-
         send_message(
             chat_id,
-            "Нашла ваши "
-            "ближайшие записи 💙",
-        )
-
-        for item in records[:10]:
-
-            send_message(
-                chat_id,
-                format_record(
-                    item["record"],
-                    item["branch"],
-                ),
-            )
-
-        if len(records) > 10:
-
-            send_message(
-                chat_id,
-                "Показала первые "
-                "10 записей.",
-            )
-
-        send_message(
-            chat_id,
-            "Что хотите "
-            "сделать дальше?",
+            "Не нашла ваши записи "
+            "в клиентской базе.\n\n"
+            "Если вы меняли номер, "
+            "откройте «⚙️ Мои данные».",
             main_keyboard(),
         )
 
         return
 
-    if record_errors:
-
-        error_text = "\n".join(
-            (
-                f"{branch}: "
-                f"{status}"
-            )
-            for (
-                branch,
-                status,
-            )
-            in record_errors
+    records, errors = (
+        get_future_records_for_clients(
+            clients
         )
+    )
 
+    if not records:
         send_message(
             chat_id,
-            "Я нашла вас "
-            "в базе 💙\n\n"
-            "Но YCLIENTS пока "
-            "не дал получить "
-            "ваши записи.\n\n"
-            "Коды ответа:\n"
-            f"{error_text}",
+            "Будущих записей "
+            "пока нет 💙",
             main_keyboard(),
         )
 
@@ -1094,15 +1818,254 @@ def show_records(
 
     send_message(
         chat_id,
-        "Нашла вас в базе 💙\n\n"
-        "Будущих записей "
-        "пока нет.",
+        "Нашла ваши "
+        "ближайшие записи 💙",
+    )
+
+    for item in records[:10]:
+        send_message(
+            chat_id,
+            format_record(
+                item[
+                    "record"
+                ],
+                item[
+                    "branch"
+                ],
+            ),
+        )
+
+    send_message(
+        chat_id,
+        "Что хотите сделать дальше?",
         main_keyboard(),
     )
 
 
 # =========================================================
-# СТАРТОВАЯ СТРАНИЦА
+# НАПОМИНАНИЯ
+# =========================================================
+
+def scan_and_send_reminders():
+    users = get_all_saved_users()
+
+    sent = 0
+    checked = 0
+
+    for user in users:
+        chat_id = user.get(
+            "chat_id"
+        )
+
+        phone = user.get(
+            "phone"
+        )
+
+        if (
+            not chat_id
+            or not phone
+        ):
+            continue
+
+        clients, errors = (
+            find_client_everywhere(
+                phone
+            )
+        )
+
+        if not clients:
+            continue
+
+        records, errors = (
+            get_future_records_for_clients(
+                clients
+            )
+        )
+
+        for item in records:
+            checked += 1
+
+            record = item[
+                "record"
+            ]
+
+            company_id = item[
+                "company_id"
+            ]
+
+            branch_name = item[
+                "branch"
+            ]
+
+            record_id = record.get(
+                "id"
+            )
+
+            if not record_id:
+                continue
+
+            hours_left = (
+                hours_until_record(
+                    record
+                )
+            )
+
+            if hours_left is None:
+                continue
+
+            # Напоминание отправляется
+            # в последние 24 часа до занятия.
+            # Если сервис временно "спал",
+            # напоминание не потеряется.
+            if not (
+                0
+                < hours_left
+                <= 24
+            ):
+                continue
+
+            existing = (
+                get_reminder_row(
+                    company_id,
+                    record_id,
+                )
+            )
+
+            if (
+                existing
+                and existing.get(
+                    "reminder_sent"
+                )
+            ):
+                continue
+
+            already_confirmed = (
+                bool(
+                    record.get(
+                        "confirmed"
+                    )
+                )
+            )
+
+            response = send_message(
+                chat_id,
+                format_reminder(
+                    record,
+                    branch_name,
+                ),
+                reminder_buttons(
+                    company_id,
+                    record_id,
+                    already_confirmed=
+                        already_confirmed,
+                ),
+            )
+
+            if (
+                response
+                and response.status_code
+                == 200
+            ):
+                dt = record_datetime(
+                    record
+                )
+
+                dt_value = (
+                    dt.isoformat()
+                    if dt
+                    else None
+                )
+
+                if existing:
+                    update_reminder_row(
+                        company_id,
+                        record_id,
+                        {
+                            "chat_id":
+                                int(chat_id),
+
+                            "record_datetime":
+                                dt_value,
+
+                            "reminder_sent":
+                                True,
+
+                            "confirmed":
+                                already_confirmed,
+                        },
+                    )
+
+                else:
+                    create_reminder_row(
+                        company_id,
+                        record_id,
+                        chat_id,
+                        dt_value,
+                        reminder_sent=True,
+                        confirmed=
+                            already_confirmed,
+                    )
+
+                sent += 1
+
+    return {
+        "users":
+            len(users),
+
+        "records_checked":
+            checked,
+
+        "sent":
+            sent,
+    }
+
+
+# =========================================================
+# ПРАВИЛО 22 ЧАСА
+# =========================================================
+
+def can_cancel_record(
+    record,
+):
+    hours_left = (
+        hours_until_record(
+            record
+        )
+    )
+
+    if hours_left is None:
+        return False
+
+    return (
+        hours_left >= 22
+    )
+
+
+def admin_for_company(
+    company_id,
+):
+    branch_name = (
+        branch_name_by_company_id(
+            company_id
+        )
+    )
+
+    if not branch_name:
+        return (
+            "администратору филиала"
+        )
+
+    return (
+        BRANCHES[
+            branch_name
+        ][
+            "admin"
+        ]
+    )
+
+
+# =========================================================
+# HOME
 # =========================================================
 
 @app.route(
@@ -1117,159 +2080,46 @@ def home():
 
 
 # =========================================================
-# YCLIENTS CONNECT
+# ENDPOINT ДЛЯ ЗАПУСКА НАПОМИНАНИЙ
 # =========================================================
 
 @app.route(
-    "/yclients/connect",
-    methods=["GET"],
+    "/tasks/send-reminders",
+    methods=[
+        "GET",
+        "POST",
+    ],
 )
-def yclients_connect():
-
-    salon_ids = []
-
-    salon_id = (
-        request.args.get(
-            "salon_id"
-        )
-    )
-
-    if salon_id:
-        salon_ids.append(
-            salon_id
-        )
-
-    salon_ids_array = (
-        request.args.getlist(
-            "salon_ids[]"
-        )
-    )
-
-    if salon_ids_array:
-        salon_ids.extend(
-            salon_ids_array
-        )
-
-    if not salon_ids:
-
-        print(
-            "YCLIENTS CONNECT PARAMS:",
-            dict(request.args),
-        )
-
+def send_reminders_task():
+    if not REMINDER_SECRET:
         return (
-            "YCLIENTS не передал salon_id.",
-            400,
+            "REMINDER_SECRET is not configured",
+            503,
         )
 
-    activation_results = []
-
-    for current_salon_id in salon_ids:
-
-        try:
-            response = (
-                activate_yclients_branch(
-                    current_salon_id
-                )
-            )
-
-            activation_results.append(
-                {
-                    "salon_id":
-                        current_salon_id,
-
-                    "status":
-                        response.status_code,
-
-                    "body":
-                        response.text[:500],
-                }
-            )
-
-        except Exception as e:
-
-            print(
-                "YCLIENTS ACTIVATION ERROR:",
-                current_salon_id,
-                e,
-            )
-
-            activation_results.append(
-                {
-                    "salon_id":
-                        current_salon_id,
-
-                    "status":
-                        "error",
-
-                    "body":
-                        str(e),
-                }
-            )
-
-    success = all(
-        item["status"] in (
-            200,
-            201,
+    supplied_key = (
+        request.headers.get(
+            "X-Reminder-Secret"
         )
-        for item
-        in activation_results
+        or request.args.get(
+            "key"
+        )
+        or ""
     )
 
-    if success:
-
+    if supplied_key != REMINDER_SECRET:
         return (
-            """
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>Капитан Бульк!</title>
-            </head>
-
-            <body style="
-                font-family: Arial, sans-serif;
-                text-align: center;
-                padding: 50px;
-            ">
-
-                <h2>
-                    Готово! 🦭
-                </h2>
-
-                <p>
-                    Капитан Бульк успешно
-                    подключён к YCLIENTS.
-                </p>
-
-                <p>
-                    Эту страницу можно закрыть.
-                </p>
-
-            </body>
-            </html>
-            """,
-            200,
+            "Unauthorized",
+            401,
         )
 
-    print(
-        "YCLIENTS ACTIVATION RESULTS:",
-        activation_results,
-    )
-
-    statuses = ", ".join(
-        (
-            f'{item["salon_id"]}: '
-            f'{item["status"]}'
-        )
-        for item
-        in activation_results
+    result = (
+        scan_and_send_reminders()
     )
 
     return (
-        "YCLIENTS не удалось "
-        "активировать интеграцию. "
-        f"Коды: {statuses}",
-        500,
+        result,
+        200,
     )
 
 
@@ -1282,28 +2132,463 @@ def yclients_connect():
     methods=["POST"],
 )
 def yclients_webhook():
-
-    try:
-        data = request.get_json(
+    data = (
+        request.get_json(
             silent=True
         )
+        or {}
+    )
 
-        print(
-            "YCLIENTS WEBHOOK RECEIVED"
+    print(
+        "YCLIENTS WEBHOOK:",
+        data,
+    )
+
+    return (
+        "ok",
+        200,
+    )
+
+
+# =========================================================
+# YCLIENTS CONNECT
+# =========================================================
+
+def activate_yclients_branch(
+    salon_id,
+):
+    url = (
+        f"{YCLIENTS_MARKETPLACE_API}"
+        "/marketplace/partner/callback"
+    )
+
+    payload = {
+        "salon_id":
+            int(salon_id),
+
+        "application_id":
+            APPLICATION_ID,
+
+        "webhook_urls": [
+            YCLIENTS_WEBHOOK_URL
+        ],
+    }
+
+    return requests.post(
+        url,
+        headers=
+            yclients_partner_headers(),
+        json=payload,
+        timeout=30,
+    )
+
+
+@app.route(
+    "/yclients/connect",
+    methods=["GET"],
+)
+def yclients_connect():
+    salon_ids = []
+
+    salon_id = request.args.get(
+        "salon_id"
+    )
+
+    if salon_id:
+        salon_ids.append(
+            salon_id
         )
 
-        print(data)
+    salon_ids.extend(
+        request.args.getlist(
+            "salon_ids[]"
+        )
+    )
 
-        return "ok", 200
-
-    except Exception as e:
-
-        print(
-            "YCLIENTS WEBHOOK ERROR:",
-            e,
+    if not salon_ids:
+        return (
+            "YCLIENTS не передал salon_id",
+            400,
         )
 
-        return "ok", 200
+    results = []
+
+    for salon_id in salon_ids:
+        try:
+            response = (
+                activate_yclients_branch(
+                    salon_id
+                )
+            )
+
+            results.append(
+                (
+                    salon_id,
+                    response.status_code,
+                )
+            )
+
+        except Exception as e:
+            results.append(
+                (
+                    salon_id,
+                    str(e),
+                )
+            )
+
+    success = all(
+        status in (
+            200,
+            201,
+        )
+        for (
+            salon,
+            status,
+        )
+        in results
+    )
+
+    if success:
+        return (
+            "Капитан Бульк успешно подключён",
+            200,
+        )
+
+    return (
+        str(results),
+        500,
+    )
+
+
+# =========================================================
+# CALLBACK-КНОПКИ TELEGRAM
+# =========================================================
+
+def handle_callback_query(
+    callback,
+):
+    callback_id = callback.get(
+        "id"
+    )
+
+    data = callback.get(
+        "data",
+        "",
+    )
+
+    message = callback.get(
+        "message",
+        {},
+    )
+
+    chat_id = (
+        message
+        .get(
+            "chat",
+            {},
+        )
+        .get(
+            "id"
+        )
+    )
+
+    message_id = message.get(
+        "message_id"
+    )
+
+    if not (
+        callback_id
+        and chat_id
+    ):
+        return
+
+    parts = data.split(
+        ":"
+    )
+
+    if len(parts) != 3:
+        answer_callback(
+            callback_id
+        )
+        return
+
+    action = parts[0]
+
+    try:
+        company_id = int(
+            parts[1]
+        )
+
+        record_id = int(
+            parts[2]
+        )
+
+    except ValueError:
+        answer_callback(
+            callback_id
+        )
+        return
+
+
+    # =====================================================
+    # ПОДТВЕРДИТЬ
+    # =====================================================
+
+    if action == "confirm":
+        answer_callback(
+            callback_id,
+            "Подтверждаю запись…",
+        )
+
+        success = (
+            confirm_yclients_record(
+                company_id,
+                record_id,
+            )
+        )
+
+        if success:
+            update_reminder_row(
+                company_id,
+                record_id,
+                {
+                    "confirmed":
+                        True,
+                },
+            )
+
+            edit_message_buttons(
+                chat_id,
+                message_id,
+                {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text":
+                                    "❌ Отменить занятие",
+                                "callback_data":
+                                    (
+                                        f"cancel:"
+                                        f"{company_id}:"
+                                        f"{record_id}"
+                                    ),
+                            }
+                        ]
+                    ]
+                },
+            )
+
+            send_message(
+                chat_id,
+                "✅ Запись подтверждена!\n\n"
+                "Спасибо 💙 "
+                "Будем ждать вас "
+                "на тренировке 🦭",
+            )
+
+        else:
+            send_message(
+                chat_id,
+                "Не получилось подтвердить "
+                "запись автоматически.\n\n"
+                "Попробуйте ещё раз "
+                "или свяжитесь с "
+                "администратором.",
+            )
+
+        return
+
+
+    # =====================================================
+    # НАЖАЛ ОТМЕНИТЬ
+    # =====================================================
+
+    if action == "cancel":
+        answer_callback(
+            callback_id
+        )
+
+        record = get_record(
+            company_id,
+            record_id,
+        )
+
+        if not record:
+            send_message(
+                chat_id,
+                "Не удалось получить "
+                "данные записи.\n\n"
+                "Пожалуйста, свяжитесь "
+                "с администратором.",
+            )
+            return
+
+        if not can_cancel_record(
+            record
+        ):
+            admin = (
+                admin_for_company(
+                    company_id
+                )
+            )
+
+            send_message(
+                chat_id,
+                "❌ Самостоятельная отмена "
+                "уже недоступна.\n\n"
+                "Отменить занятие через бота "
+                "можно не позднее чем "
+                "за 22 часа до начала.\n\n"
+                "Сейчас, пожалуйста, "
+                "напишите администратору "
+                "вашего филиала:\n"
+                f"👉 {admin}",
+            )
+
+            return
+
+        send_message(
+            chat_id,
+            "Вы точно хотите "
+            "отменить занятие?\n\n"
+            "После отмены запись "
+            "освободится.",
+            confirm_cancel_buttons(
+                company_id,
+                record_id,
+            ),
+        )
+
+        return
+
+
+    # =====================================================
+    # НЕТ, ОСТАВИТЬ
+    # =====================================================
+
+    if action == "cancel_no":
+        answer_callback(
+            callback_id,
+            "Запись оставлена 💙",
+        )
+
+        edit_message_buttons(
+            chat_id,
+            message_id,
+        )
+
+        send_message(
+            chat_id,
+            "Хорошо 💙 "
+            "Запись остаётся в силе. "
+            "Ждём вас на тренировке 🦭",
+        )
+
+        return
+
+
+    # =====================================================
+    # ДА, ОТМЕНИТЬ
+    # =====================================================
+
+    if action == "cancel_yes":
+        answer_callback(
+            callback_id,
+            "Проверяю возможность отмены…",
+        )
+
+        # Повторно проверяем время,
+        # потому что клиент мог нажать
+        # кнопку значительно позже.
+        record = get_record(
+            company_id,
+            record_id,
+        )
+
+        if not record:
+            send_message(
+                chat_id,
+                "Не удалось получить "
+                "актуальную запись.\n\n"
+                "Пожалуйста, свяжитесь "
+                "с администратором.",
+            )
+            return
+
+        if not can_cancel_record(
+            record
+        ):
+            admin = (
+                admin_for_company(
+                    company_id
+                )
+            )
+
+            edit_message_buttons(
+                chat_id,
+                message_id,
+            )
+
+            send_message(
+                chat_id,
+                "За время подтверждения "
+                "до занятия осталось "
+                "меньше 22 часов.\n\n"
+                "Самостоятельная отмена "
+                "уже недоступна.\n\n"
+                "Напишите администратору:\n"
+                f"👉 {admin}",
+            )
+
+            return
+
+        success = (
+            delete_yclients_record(
+                company_id,
+                record_id,
+            )
+        )
+
+        if success:
+            update_reminder_row(
+                company_id,
+                record_id,
+                {
+                    "cancelled":
+                        True,
+                },
+            )
+
+            edit_message_buttons(
+                chat_id,
+                message_id,
+            )
+
+            send_message(
+                chat_id,
+                "✅ Занятие отменено.\n\n"
+                "Будем ждать вас "
+                "в другой раз 💙🦭",
+                main_keyboard(),
+            )
+
+        else:
+            admin = (
+                admin_for_company(
+                    company_id
+                )
+            )
+
+            send_message(
+                chat_id,
+                "Не получилось отменить "
+                "запись автоматически.\n\n"
+                "Пожалуйста, напишите "
+                "администратору:\n"
+                f"👉 {admin}",
+            )
+
+        return
 
 
 # =========================================================
@@ -1315,7 +2600,6 @@ def yclients_webhook():
     methods=["POST"],
 )
 def telegram_webhook():
-
     update = (
         request.get_json(
             silent=True
@@ -1323,24 +2607,48 @@ def telegram_webhook():
         or {}
     )
 
+    # INLINE BUTTONS
+    callback = update.get(
+        "callback_query"
+    )
+
+    if callback:
+        handle_callback_query(
+            callback
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+
     message = update.get(
         "message"
     )
 
     if not message:
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
-    chat = message.get(
-        "chat",
-        {}
-    )
-
-    chat_id = chat.get(
-        "id"
+    chat_id = (
+        message
+        .get(
+            "chat",
+            {},
+        )
+        .get(
+            "id"
+        )
     )
 
     if not chat_id:
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
     text = message.get(
         "text",
@@ -1351,12 +2659,49 @@ def telegram_webhook():
         "contact"
     )
 
+    sender_id = (
+        message
+        .get(
+            "from",
+            {},
+        )
+        .get(
+            "id"
+        )
+    )
+
 
     # =====================================================
-    # ПОЛУЧИЛИ НОМЕР
+    # КОНТАКТ
     # =====================================================
 
     if contact:
+        contact_user_id = (
+            contact.get(
+                "user_id"
+            )
+        )
+
+        # Не разрешаем привязать
+        # чужой Telegram-контакт.
+        if (
+            contact_user_id
+            and sender_id
+            and contact_user_id
+            != sender_id
+        ):
+            send_message(
+                chat_id,
+                "Пожалуйста, отправьте "
+                "именно свой номер "
+                "кнопкой ниже.",
+                phone_keyboard(),
+            )
+
+            return (
+                "ok",
+                200,
+            )
 
         phone = normalize_phone(
             contact.get(
@@ -1366,7 +2711,8 @@ def telegram_webhook():
         )
 
         action = (
-            PENDING_ACTIONS.get(
+            PENDING_ACTIONS
+            .get(
                 chat_id,
                 "records",
             )
@@ -1378,164 +2724,98 @@ def telegram_webhook():
             "в базе Капитана Булька… 🦭",
         )
 
-        clients, client_errors = (
+        clients, errors = (
             find_client_everywhere(
                 phone
             )
         )
 
         if not clients:
-
-            if client_errors:
-
-                error_text = "\n".join(
-                    (
-                        f"{branch}: "
-                        f"{status}"
-                    )
-                    for (
-                        branch,
-                        status,
-                    )
-                    in client_errors
-                )
-
-                send_message(
-                    chat_id,
-                    "Не удалось получить "
-                    "данные из YCLIENTS.\n\n"
-                    "Коды ответа:\n"
-                    f"{error_text}",
-                    main_keyboard(),
-                )
-
-            else:
-
-                send_message(
-                    chat_id,
-                    "Не нашла этот номер "
-                    "в нашей клиентской базе.\n\n"
-                    "Проверьте, что отправлен "
-                    "тот же номер, который "
-                    "указывали при записи.",
-                    main_keyboard(),
-                )
+            send_message(
+                chat_id,
+                "Не нашла этот номер "
+                "в нашей базе.\n\n"
+                "Проверьте, пожалуйста, "
+                "что это тот номер, "
+                "который указан в YCLIENTS.",
+                main_keyboard(),
+            )
 
             PENDING_ACTIONS.pop(
                 chat_id,
                 None,
             )
 
-            return "ok", 200
-
-
-        client_name = (
-            get_client_name(
-                clients
+            return (
+                "ok",
+                200,
             )
+
+        name = get_client_name(
+            clients
         )
 
         saved = save_user(
             chat_id,
             phone,
-            client_name,
+            name,
         )
 
         if not saved:
-
             send_message(
                 chat_id,
                 "Я нашла вас в базе, "
                 "но пока не смогла "
                 "сохранить номер.\n\n"
-                "Попробуйте ещё раз "
-                "чуть позже.",
+                "Попробуйте чуть позже.",
                 main_keyboard(),
             )
 
-            PENDING_ACTIONS.pop(
-                chat_id,
-                None,
+            return (
+                "ok",
+                200,
             )
 
-            return "ok", 200
-
-
-        # =================================================
-        # СМЕНА НОМЕРА
-        # =================================================
+        PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
 
         if action == "change_phone":
-
-            if client_name:
-                greeting = (
-                    f"{client_name}, "
-                    "новый номер сохранён 💙"
-                )
-
-            else:
-                greeting = (
-                    "Новый номер "
-                    "сохранён 💙"
-                )
-
             send_message(
                 chat_id,
-                greeting,
+                "✅ Новый номер сохранён 💙",
                 main_keyboard(),
             )
 
-            PENDING_ACTIONS.pop(
-                chat_id,
-                None,
+            return (
+                "ok",
+                200,
             )
-
-            return "ok", 200
-
-
-        # =================================================
-        # ЗАПИСИ
-        # =================================================
-
-        if action == "records":
-
-            PENDING_ACTIONS.pop(
-                chat_id,
-                None,
-            )
-
-            show_records(
-                chat_id,
-                phone,
-            )
-
-            return "ok", 200
-
-
-        # =================================================
-        # АБОНЕМЕНТ
-        # =================================================
 
         if action == "subscription":
-
-            PENDING_ACTIONS.pop(
-                chat_id,
-                None,
-            )
-
             send_message(
                 chat_id,
-                "Нашла вас в базе 💙\n\n"
-                "Номер сохранён — "
-                "больше отправлять "
-                "его каждый раз "
-                "не понадобится.\n\n"
-                "Информацию по абонементу "
-                "подключим следующим этапом.",
+                "Номер сохранён 💙\n\n"
+                "Абонемент подключим "
+                "следующим этапом.",
                 main_keyboard(),
             )
 
-            return "ok", 200
+            return (
+                "ok",
+                200,
+            )
+
+        show_records(
+            chat_id,
+            phone,
+        )
+
+        return (
+            "ok",
+            200,
+        )
 
 
     # =====================================================
@@ -1543,62 +2823,51 @@ def telegram_webhook():
     # =====================================================
 
     if text == "/start":
-
         PENDING_ACTIONS.pop(
             chat_id,
             None,
         )
 
-        saved_user = (
-            get_saved_user(
-                chat_id
-            )
+        saved_user = get_saved_user(
+            chat_id
         )
 
         if saved_user:
-
             name = (
                 saved_user.get(
                     "name"
                 )
             )
 
-            if name:
-                hello = (
-                    f"С возвращением, "
-                    f"{name}! 🦭💙"
-                )
-
-            else:
-                hello = (
-                    "С возвращением! 🦭💙"
-                )
-
-            send_message(
-                chat_id,
-                hello
-                + "\n\n"
-                + "Я уже помню ваш номер, "
-                + "поэтому повторно "
-                + "отправлять его не нужно.",
-                main_keyboard(),
+            greeting = (
+                f"С возвращением"
+                f"{', ' + name if name else ''}! "
+                "🦭💙\n\n"
+                "Я уже помню ваш номер — "
+                "повторно отправлять "
+                "его не нужно."
             )
 
         else:
-
-            send_message(
-                chat_id,
+            greeting = (
                 "Привет! 🦭\n"
                 "Я Капитан Бульк — "
                 "ваш помощник 💙\n\n"
                 "Здесь можно записаться "
                 "на занятие, посмотреть "
-                "свои записи и узнать "
-                "информацию об абонементе.",
-                main_keyboard(),
+                "записи и управлять ими."
             )
 
-        return "ok", 200
+        send_message(
+            chat_id,
+            greeting,
+            main_keyboard(),
+        )
+
+        return (
+            "ok",
+            200,
+        )
 
 
     # =====================================================
@@ -1606,23 +2875,19 @@ def telegram_webhook():
     # =====================================================
 
     if text == "🏊 Записаться":
-
-        PENDING_ACTIONS.pop(
-            chat_id,
-            None,
-        )
-
         send_message(
             chat_id,
             "Выберите филиал:",
             branch_keyboard(),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
 
     if text in BRANCHES:
-
         branch = BRANCHES[
             text
         ]
@@ -1638,7 +2903,10 @@ def telegram_webhook():
             ),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
 
     # =====================================================
@@ -1646,86 +2914,76 @@ def telegram_webhook():
     # =====================================================
 
     if text == "📅 Мои записи":
-
-        saved_user = (
-            get_saved_user(
-                chat_id
-            )
+        saved_user = get_saved_user(
+            chat_id
         )
 
-        if saved_user:
-
-            phone = saved_user.get(
+        if (
+            saved_user
+            and saved_user.get(
                 "phone"
             )
-
-            if phone:
-                show_records(
-                    chat_id,
-                    phone,
-                )
-
-                return "ok", 200
-
-
-        PENDING_ACTIONS[
-            chat_id
-        ] = "records"
-
-        send_message(
-            chat_id,
-            "Чтобы найти ваши записи, "
-            "один раз отправьте номер "
-            "телефона, который указан "
-            "в YCLIENTS.\n\n"
-            "Я запомню его, и дальше "
-            "повторно отправлять "
-            "номер не понадобится 💙",
-            phone_keyboard(),
-        )
-
-        return "ok", 200
-
-
-    # =====================================================
-    # МОЙ АБОНЕМЕНТ
-    # =====================================================
-
-    if text == "🎟️ Мой абонемент":
-
-        saved_user = (
-            get_saved_user(
-                chat_id
+        ):
+            show_records(
+                chat_id,
+                saved_user[
+                    "phone"
+                ],
             )
-        )
 
-        if saved_user:
+        else:
+            PENDING_ACTIONS[
+                chat_id
+            ] = "records"
 
             send_message(
                 chat_id,
+                "Чтобы найти ваши записи, "
+                "один раз отправьте "
+                "свой номер телефона.",
+                phone_keyboard(),
+            )
+
+        return (
+            "ok",
+            200,
+        )
+
+
+    # =====================================================
+    # АБОНЕМЕНТ
+    # =====================================================
+
+    if text == "🎟️ Мой абонемент":
+        saved_user = get_saved_user(
+            chat_id
+        )
+
+        if saved_user:
+            send_message(
+                chat_id,
                 "Я уже помню ваш номер 💙\n\n"
-                "Информацию по абонементу "
-                "подключим следующим этапом.",
+                "Сам абонемент подключим "
+                "следующим этапом.",
                 main_keyboard(),
             )
 
-            return "ok", 200
+        else:
+            PENDING_ACTIONS[
+                chat_id
+            ] = "subscription"
 
+            send_message(
+                chat_id,
+                "Отправьте номер телефона, "
+                "который указан в YCLIENTS.",
+                phone_keyboard(),
+            )
 
-        PENDING_ACTIONS[
-            chat_id
-        ] = "subscription"
-
-        send_message(
-            chat_id,
-            "Чтобы найти ваш абонемент, "
-            "один раз отправьте номер "
-            "телефона, который указан "
-            "в YCLIENTS.",
-            phone_keyboard(),
+        return (
+            "ok",
+            200,
         )
-
-        return "ok", 200
 
 
     # =====================================================
@@ -1733,30 +2991,26 @@ def telegram_webhook():
     # =====================================================
 
     if text == "⚙️ Мои данные":
-
-        saved_user = (
-            get_saved_user(
-                chat_id
-            )
+        saved_user = get_saved_user(
+            chat_id
         )
 
         if not saved_user:
-
             PENDING_ACTIONS[
                 chat_id
             ] = "change_phone"
 
             send_message(
                 chat_id,
-                "У вас пока нет "
-                "сохранённого номера.\n\n"
                 "Отправьте номер телефона, "
                 "который указан в YCLIENTS.",
                 phone_keyboard(),
             )
 
-            return "ok", 200
-
+            return (
+                "ok",
+                200,
+            )
 
         name = (
             saved_user.get(
@@ -1776,21 +3030,17 @@ def telegram_webhook():
             "⚙️ Мои данные\n\n"
             f"👤 Имя: {name}\n"
             f"📱 Телефон: "
-            f"{masked_phone(phone)}\n\n"
-            "Если номер изменился, "
-            "его можно перепривязать.",
+            f"{masked_phone(phone)}",
             user_data_keyboard(),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
-
-    # =====================================================
-    # ИЗМЕНИТЬ НОМЕР
-    # =====================================================
 
     if text == "📱 Изменить номер":
-
         PENDING_ACTIONS[
             chat_id
         ] = "change_phone"
@@ -1798,13 +3048,14 @@ def telegram_webhook():
         send_message(
             chat_id,
             "Отправьте новый номер "
-            "телефона кнопкой ниже.\n\n"
-            "Он должен совпадать с номером "
-            "в вашей карточке YCLIENTS.",
+            "кнопкой ниже.",
             phone_keyboard(),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
 
     # =====================================================
@@ -1812,16 +3063,25 @@ def telegram_webhook():
     # =====================================================
 
     if text == "💬 Связаться с нами":
-
         send_message(
             chat_id,
-            "Напишите нам, "
-            "и администратор "
-            "поможет вам 💙",
+            "Выберите нужный филиал "
+            "и напишите администратору:\n\n"
+            "📍 Нагатинская — "
+            "@Bulk_nagatinskaya\n"
+            "📍 Беломорская — "
+            "@Bulk_levoberezhny\n"
+            "📍 Базовская — "
+            "@Bulk_hovrino\n"
+            "📍 Истринская — "
+            "@Bulk_molodezhnaia",
             main_keyboard(),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
 
     # =====================================================
@@ -1829,7 +3089,6 @@ def telegram_webhook():
     # =====================================================
 
     if text == "← Назад":
-
         PENDING_ACTIONS.pop(
             chat_id,
             None,
@@ -1841,12 +3100,11 @@ def telegram_webhook():
             main_keyboard(),
         )
 
-        return "ok", 200
+        return (
+            "ok",
+            200,
+        )
 
-
-    # =====================================================
-    # НЕИЗВЕСТНАЯ КОМАНДА
-    # =====================================================
 
     send_message(
         chat_id,
@@ -1855,15 +3113,17 @@ def telegram_webhook():
         main_keyboard(),
     )
 
-    return "ok", 200
+    return (
+        "ok",
+        200,
+    )
 
 
 # =========================================================
-# ЗАПУСК
+# START APP
 # =========================================================
 
 if __name__ == "__main__":
-
     port = int(
         os.environ.get(
             "PORT",

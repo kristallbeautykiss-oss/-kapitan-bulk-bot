@@ -8,9 +8,9 @@ from flask import Flask, request
 app = Flask(__name__)
 
 
-# =========================
+# =========================================================
 # НАСТРОЙКИ
-# =========================
+# =========================================================
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"]
@@ -22,41 +22,44 @@ YCLIENTS_API = "https://api.yclients.ru/api/v1"
 BRANCHES = {
     "Нагатинская": {
         "company_id": 558795,
-        "booking_url": "https://n591306.yclients.ru"
+        "booking_url": "https://n591306.yclients.ru",
     },
     "Беломорская": {
         "company_id": 647846,
-        "booking_url": "https://n685581.yclients.ru"
+        "booking_url": "https://n685581.yclients.ru",
     },
     "Базовская": {
         "company_id": 594760,
-        "booking_url": "https://n629339.yclients.ru"
+        "booking_url": "https://n629339.yclients.ru",
     },
     "Истринская": {
         "company_id": 689709,
-        "booking_url": "https://n731690.yclients.ru"
-    }
+        "booking_url": "https://n731690.yclients.ru",
+    },
 }
 
 
-# =========================
+# =========================================================
 # TELEGRAM
-# =========================
+# =========================================================
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {
         "chat_id": chat_id,
-        "text": text
+        "text": text,
     }
 
     if reply_markup:
         payload["reply_markup"] = reply_markup
 
-    requests.post(
-        f"{TELEGRAM_API}/sendMessage",
-        json=payload,
-        timeout=15
-    )
+    try:
+        requests.post(
+            f"{TELEGRAM_API}/sendMessage",
+            json=payload,
+            timeout=15,
+        )
+    except Exception as e:
+        print("Telegram send_message error:", e)
 
 
 def main_keyboard():
@@ -64,14 +67,14 @@ def main_keyboard():
         "keyboard": [
             [
                 {"text": "🏊 Записаться"},
-                {"text": "🎟️ Мой абонемент"}
+                {"text": "🎟️ Мой абонемент"},
             ],
             [
                 {"text": "📅 Мои записи"},
-                {"text": "💬 Связаться с нами"}
-            ]
+                {"text": "💬 Связаться с нами"},
+            ],
         ],
-        "resize_keyboard": True
+        "resize_keyboard": True,
     }
 
 
@@ -79,18 +82,18 @@ def branch_keyboard():
     return {
         "keyboard": [
             [
-                {"text": "📍 Нагатинская"},
-                {"text": "📍 Беломорская"}
+                {"text": "Нагатинская"},
+                {"text": "Беломорская"},
             ],
             [
-                {"text": "📍 Базовская"},
-                {"text": "📍 Истринская"}
+                {"text": "Базовская"},
+                {"text": "Истринская"},
             ],
             [
-                {"text": "← Назад"}
-            ]
+                {"text": "← Назад"},
+            ],
         ],
-        "resize_keyboard": True
+        "resize_keyboard": True,
     }
 
 
@@ -100,30 +103,36 @@ def phone_keyboard():
             [
                 {
                     "text": "📱 Поделиться номером телефона",
-                    "request_contact": True
+                    "request_contact": True,
                 }
             ],
             [
-                {"text": "← Назад"}
-            ]
+                {"text": "← Назад"},
+            ],
         ],
         "resize_keyboard": True,
-        "one_time_keyboard": True
+        "one_time_keyboard": True,
     }
 
 
 def booking_button(branch_name):
+    branch = BRANCHES[branch_name]
+
     return {
         "inline_keyboard": [
             [
                 {
-                    "text": f"🏊 Записаться — {branch_name}",
-                    "url": BRANCHES[branch_name]["booking_url"]
+                    "text": f"Записаться — {branch_name}",
+                    "url": branch["booking_url"],
                 }
             ]
         ]
     }
 
+
+# =========================================================
+# YCLIENTS
+# =========================================================
 
 def normalize_phone(phone):
     digits = re.sub(r"\D", "", phone or "")
@@ -131,21 +140,17 @@ def normalize_phone(phone):
     if len(digits) == 11 and digits.startswith("8"):
         digits = "7" + digits[1:]
 
-    if len(digits) == 10:
+    elif len(digits) == 10:
         digits = "7" + digits
 
     return digits
 
 
-# =========================
-# YCLIENTS
-# =========================
-
 def yclients_headers():
     return {
         "Authorization": f"Bearer {YCLIENTS_USER_TOKEN}",
         "Accept": "application/vnd.yclients.v2+json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
 
@@ -158,7 +163,7 @@ def search_client_in_branch(company_id, phone):
         "fields": [
             "id",
             "name",
-            "phone"
+            "phone",
         ],
         "operation": "AND",
         "filters": [
@@ -166,9 +171,9 @@ def search_client_in_branch(company_id, phone):
                 "type": "quick_search",
                 "state": {
                     "value": phone
-                }
+                },
             }
-        ]
+        ],
     }
 
     try:
@@ -176,57 +181,63 @@ def search_client_in_branch(company_id, phone):
             url,
             headers=yclients_headers(),
             json=body,
-            timeout=15
+            timeout=15,
         )
 
-        if response.status_code != 200:
-            return {
-                "ok": False,
-                "status": response.status_code,
-                "clients": []
-            }
-
-        data = response.json()
-
-        clients = []
-
-        if isinstance(data, dict):
-            raw_clients = data.get("data", [])
-
-            if isinstance(raw_clients, dict):
-                raw_clients = raw_clients.get("items", [])
-
-            if isinstance(raw_clients, list):
-                clients = raw_clients
-
-        return {
-            "ok": True,
-            "status": 200,
-            "clients": clients
+        result = {
+            "ok": response.ok,
+            "status": response.status_code,
+            "clients": [],
         }
 
-    except Exception:
+        if not response.ok:
+            print(
+                "YCLIENTS error:",
+                company_id,
+                response.status_code,
+                response.text,
+            )
+            return result
+
+        data = response.json().get("data", [])
+
+        if isinstance(data, list):
+            clients = data
+
+        elif isinstance(data, dict):
+            clients = data.get("items", [])
+
+        else:
+            clients = []
+
+        result["clients"] = clients
+
+        return result
+
+    except Exception as e:
+        print("YCLIENTS request error:", company_id, e)
+
         return {
             "ok": False,
-            "status": 0,
-            "clients": []
+            "status": "error",
+            "clients": [],
         }
 
 
 def find_client_everywhere(phone):
+    phone = normalize_phone(phone)
+
     found = []
-    errors = []
+    errors = {}
 
     for branch_name, branch in BRANCHES.items():
         result = search_client_in_branch(
             branch["company_id"],
-            phone
+            phone,
         )
 
         if not result["ok"]:
-            errors.append(
-                f'{branch_name}: {result["status"]}'
-            )
+            errors[branch_name] = result["status"]
             continue
 
         for client in result["clients"]:
@@ -235,28 +246,48 @@ def find_client_everywhere(phone):
             )
 
             if client_phone == phone:
-                found.append({
-                    "branch": branch_name,
-                    "company_id": branch["company_id"],
-                    "client_id": client.get("id"),
-                    "name": client.get("name") or "Клиент"
-                })
+                found.append(
+                    {
+                        "branch": branch_name,
+                        "client": client,
+                    }
+                )
+                break
 
     return found, errors
 
 
-# =========================
-# HEALTH CHECK
-# =========================
+# =========================================================
+# ПРОВЕРКА СЕРВЕРА
+# =========================================================
 
 @app.route("/", methods=["GET"])
 def home():
     return "Kapitan Bulk bot is running", 200
 
 
-# =========================
+# =========================================================
+# YCLIENTS REGISTRATION REDIRECT
+# =========================================================
+
+@app.route("/yclients/connect", methods=["GET"])
+def yclients_connect():
+    salon_id = request.args.get("salon_id")
+
+    if not salon_id:
+        return "YCLIENTS: salon_id не передан", 400
+
+    print("YCLIENTS salon_id received:", salon_id)
+
+    return (
+        f"YCLIENTS подключение получено. salon_id={salon_id}",
+        200,
+    )
+
+
+# =========================================================
 # TELEGRAM WEBHOOK
-# =========================
+# =========================================================
 
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
@@ -267,7 +298,8 @@ def telegram_webhook():
     if not message:
         return "ok", 200
 
-    chat_id = message.get("chat", {}).get("id")
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
 
     if not chat_id:
         return "ok", 200
@@ -276,192 +308,186 @@ def telegram_webhook():
     contact = message.get("contact")
 
 
-    # -------------------------
-    # ПОЛУЧИЛИ ТЕЛЕФОН
-    # -------------------------
+    # -----------------------------------------------------
+    # ПОЛЬЗОВАТЕЛЬ ОТПРАВИЛ ТЕЛЕФОН
+    # -----------------------------------------------------
 
     if contact:
-        phone = normalize_phone(
-            contact.get("phone_number")
-        )
-
-        if not phone:
-            send_message(
-                chat_id,
-                "Не получилось определить номер телефона.",
-                phone_keyboard()
-            )
-            return "ok", 200
+        phone = contact.get("phone_number", "")
 
         send_message(
             chat_id,
-            "Ищу вас в базе Капитана Булька… 🦭"
+            "Ищу вас в базе Капитана Булька… 🦭",
+            main_keyboard(),
         )
 
-        clients, errors = find_client_everywhere(phone)
+        found, errors = find_client_everywhere(phone)
 
-        if clients:
-            branches = []
-
-            for client in clients:
-                branches.append(
-                    f'• {client["branch"]}'
-                )
-
-            branches_text = "\n".join(branches)
+        if found:
+            branches = "\n".join(
+                f"• {item['branch']}"
+                for item in found
+            )
 
             send_message(
                 chat_id,
                 "Нашёл вас в YCLIENTS ✅\n\n"
-                f"{branches_text}\n\n"
-                "Отлично! Теперь можем подключать "
-                "ваши будущие записи.",
-                main_keyboard()
+                f"Вы найдены в филиалах:\n{branches}",
+                main_keyboard(),
             )
 
-        elif errors:
-            error_text = "\n".join(errors)
+            return "ok", 200
+
+        if errors:
+            error_text = "\n".join(
+                f"{branch}: {status}"
+                for branch, status in errors.items()
+            )
 
             send_message(
                 chat_id,
                 "YCLIENTS пока не дал получить клиентскую базу.\n\n"
                 "Коды ответа:\n"
                 f"{error_text}\n\n"
-                "Пришлите мне этот экран — "
-                "по коду сразу поймём, что нужно поправить.",
-                main_keyboard()
+                "Пришлите мне этот экран — по коду сразу поймём, "
+                "что нужно поправить.",
+                main_keyboard(),
             )
 
-        else:
-            send_message(
-                chat_id,
-                "Не нашёл клиента с таким номером "
-                "ни в одном из четырёх филиалов.\n\n"
-                "Проверьте, что в YCLIENTS указан "
-                "тот же номер телефона.",
-                main_keyboard()
-            )
+            return "ok", 200
+
+        send_message(
+            chat_id,
+            "По этому номеру пока не нашёл клиента в YCLIENTS.",
+            main_keyboard(),
+        )
 
         return "ok", 200
 
 
-    # -------------------------
-    # START
-    # -------------------------
+    # -----------------------------------------------------
+    # /START
+    # -----------------------------------------------------
 
     if text == "/start":
         send_message(
             chat_id,
-            "Привет! 🦭\n\n"
+            "Привет! 🦭\n"
             "Я Капитан Бульк — ваш помощник 💙\n\n"
             "Здесь можно записаться на занятие, "
-            "посмотреть свои записи и узнать "
-            "информацию об абонементе.",
-            main_keyboard()
+            "посмотреть свои записи и узнать информацию "
+            "об абонементе.",
+            main_keyboard(),
         )
+
         return "ok", 200
 
 
-    # -------------------------
+    # -----------------------------------------------------
     # ЗАПИСАТЬСЯ
-    # -------------------------
+    # -----------------------------------------------------
 
     if text == "🏊 Записаться":
         send_message(
             chat_id,
             "Выберите филиал 👇",
-            branch_keyboard()
+            branch_keyboard(),
         )
-        return "ok", 200
-
-
-    # -------------------------
-    # ФИЛИАЛ
-    # -------------------------
-
-    if text.startswith("📍 "):
-        branch_name = text.replace(
-            "📍 ",
-            "",
-            1
-        ).strip()
-
-        if branch_name in BRANCHES:
-            send_message(
-                chat_id,
-                f"Вы выбрали филиал «{branch_name}» 🦭\n\n"
-                "Нажмите кнопку ниже, чтобы перейти к записи:",
-                booking_button(branch_name)
-            )
 
         return "ok", 200
 
 
-    # -------------------------
+    # -----------------------------------------------------
+    # ВЫБОР ФИЛИАЛА
+    # -----------------------------------------------------
+
+    if text in BRANCHES:
+        send_message(
+            chat_id,
+            f"Вы выбрали филиал «{text}» 💙",
+            booking_button(text),
+        )
+
+        return "ok", 200
+
+
+    # -----------------------------------------------------
     # МОИ ЗАПИСИ
-    # -------------------------
+    # -----------------------------------------------------
 
     if text == "📅 Мои записи":
         send_message(
             chat_id,
             "Чтобы найти вас в YCLIENTS, "
             "поделитесь номером телефона 👇",
-            phone_keyboard()
+            phone_keyboard(),
         )
+
         return "ok", 200
 
 
-    # -------------------------
+    # -----------------------------------------------------
     # МОЙ АБОНЕМЕНТ
-    # -------------------------
+    # -----------------------------------------------------
 
     if text == "🎟️ Мой абонемент":
         send_message(
             chat_id,
             "Чтобы найти ваш абонемент в YCLIENTS, "
             "поделитесь номером телефона 👇",
-            phone_keyboard()
+            phone_keyboard(),
         )
+
         return "ok", 200
 
 
-    # -------------------------
+    # -----------------------------------------------------
     # СВЯЗАТЬСЯ
-    # -------------------------
+    # -----------------------------------------------------
 
     if text == "💬 Связаться с нами":
         send_message(
             chat_id,
-            "Напишите нам, и администратор поможет вам 💙",
-            main_keyboard()
+            "Здесь скоро появятся контакты администратора 💙",
+            main_keyboard(),
         )
+
         return "ok", 200
 
 
-    # -------------------------
+    # -----------------------------------------------------
     # НАЗАД
-    # -------------------------
+    # -----------------------------------------------------
 
     if text == "← Назад":
         send_message(
             chat_id,
-            "Главное меню 🦭",
-            main_keyboard()
+            "Выберите нужный раздел 👇",
+            main_keyboard(),
         )
+
         return "ok", 200
 
+
+    # -----------------------------------------------------
+    # ЕСЛИ НЕ ПОНЯЛИ СООБЩЕНИЕ
+    # -----------------------------------------------------
 
     send_message(
         chat_id,
         "Выберите нужный раздел 👇",
-        main_keyboard()
+        main_keyboard(),
     )
 
     return "ok", 200
 
 
+# =========================================================
+# ЛОКАЛЬНЫЙ ЗАПУСК
+# =========================================================
+
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
+        port=int(os.environ.get("PORT", 10000)),
     )

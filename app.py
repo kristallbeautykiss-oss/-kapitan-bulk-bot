@@ -286,6 +286,26 @@ def yclients_connect():
 
 
 # =========================================================
+# YCLIENTS WEBHOOK
+# =========================================================
+
+@app.route("/yclients/webhook", methods=["POST"])
+def yclients_webhook():
+    try:
+        data = request.get_json(silent=True)
+
+        print("YCLIENTS WEBHOOK RECEIVED")
+        print(data)
+
+        return "ok", 200
+
+    except Exception as e:
+        print("YCLIENTS webhook error:", e)
+
+        return "ok", 200
+
+
+# =========================================================
 # TELEGRAM WEBHOOK
 # =========================================================
 

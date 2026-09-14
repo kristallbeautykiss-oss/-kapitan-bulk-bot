@@ -1,13 +1,17 @@
 import os
 import re
 import requests
+
+from datetime import date, timedelta, datetime
 from flask import Flask, request
+
 
 app = Flask(__name__)
 
-# =========================
+
+# =========================================================
 # НАСТРОЙКИ
-# =========================
+# =========================================================
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"]
@@ -44,9 +48,15 @@ BRANCHES = {
 }
 
 
-# =========================
+# Запоминаем, что пользователь хотел узнать:
+# записи или абонемент.
+# Для тестирования этого достаточно.
+PENDING_ACTIONS = {}
+
+
+# =========================================================
 # TELEGRAM
-# =========================
+# =========================================================
 
 def send_message(chat_id, text, reply_markup=None):
     payload = {
@@ -126,9 +136,9 @@ def booking_button(url):
     }
 
 
-# =========================
+# =========================================================
 # ТЕЛЕФОН
-# =========================
+# =========================================================
 
 def normalize_phone(phone):
     digits = re.sub(r"\D", "", phone or "")
@@ -142,9 +152,9 @@ def normalize_phone(phone):
     return digits
 
 
-# =========================
+# =========================================================
 # YCLIENTS — АВТОРИЗАЦИЯ
-# =========================
+# =========================================================
 
 def yclients_user_headers():
     return {
@@ -165,9 +175,9 @@ def yclients_partner_headers():
     }
 
 
-# =========================
+# =========================================================
 # YCLIENTS — АКТИВАЦИЯ
-# =========================
+# =========================================================
 
 def activate_yclients_branch(salon_id):
     url = (
@@ -200,9 +210,9 @@ def activate_yclients_branch(salon_id):
     return response
 
 
-# =========================
+# =========================================================
 # YCLIENTS — ПОИСК КЛИЕНТА
-# =========================
+# =========================================================
 
 def search_client_in_branch(company_id, phone):
     url = (
@@ -241,7 +251,7 @@ def search_client_in_branch(company_id, phone):
             "CLIENT SEARCH:",
             company_id,
             response.status_code,
-            response.text[:500],
+            response.text[:700],
         )
 
         if response.status_code != 200:
@@ -255,6 +265,13 @@ def search_client_in_branch(company_id, phone):
 
         clients = data.get("data", [])
 
+        if isinstance(clients, dict):
+            clients = (
+                clients.get("clients")
+                or clients.get("items")
+                or []
+            )
+
         return {
             "ok": True,
             "status": 200,
@@ -263,7 +280,7 @@ def search_client_in_branch(company_id, phone):
 
     except Exception as e:
         print(
-            "YCLIENTS client search error:",
+            "YCLIENTS CLIENT SEARCH ERROR:",
             company_id,
             e,
         )
@@ -307,6 +324,7 @@ def find_client_everywhere(phone):
                 results.append(
                     {
                         "branch": branch_name,
+                        "company_id": company_id,
                         "client": client,
                     }
                 )
@@ -314,18 +332,232 @@ def find_client_everywhere(phone):
     return results, errors
 
 
-# =========================
+# =========================================================
+# YCLIENTS — ЗАПИСИ КЛИЕНТА
+# =========================================================
+
+def get_client_records(company_id, client_id):
+    url = (
+        f"{YCLIENTS_API}"
+        f"/records/{company_id}"
+    )
+
+    today = date.today()
+    end_day = today + timedelta(days=365)
+
+    params = {
+        "page": 1,
+        "count": 100,
+        "client_id": client_id,
+        "start_date": today.isoformat(),
+        "end_date": end_day.isoformat(),
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=yclients_user_headers(),
+            params=params,
+            timeout=30,
+        )
+
+        print(
+            "RECORD SEARCH:",
+            company_id,
+            client_id,
+            response.status_code,
+            response.text[:1000],
+        )
+
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "status": response.status_code,
+                "records": [],
+            }
+
+        data = response.json()
+        records = data.get("data", [])
+
+        if isinstance(records, dict):
+            records = (
+                records.get("records")
+                or records.get("items")
+                or []
+            )
+
+        if not isinstance(records, list):
+            records = []
+
+        return {
+            "ok": True,
+            "status": 200,
+            "records": records,
+        }
+
+    except Exception as e:
+        print(
+            "YCLIENTS RECORD SEARCH ERROR:",
+            company_id,
+            client_id,
+            e,
+        )
+
+        return {
+            "ok": False,
+            "status": "error",
+            "records": [],
+        }
+
+
+def record_datetime(record):
+    value = (
+        record.get("datetime")
+        or record.get("date")
+        or ""
+    )
+
+    if not value:
+        return None
+
+    try:
+        clean_value = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(clean_value)
+
+    except Exception:
+        return None
+
+
+def format_record(record, branch_name):
+    dt = record_datetime(record)
+
+    if dt:
+        date_text = dt.strftime("%d.%m.%Y")
+        time_text = dt.strftime("%H:%M")
+    else:
+        raw_date = str(record.get("date", ""))
+        date_text = raw_date or "дата не указана"
+        time_text = ""
+
+    staff = record.get("staff") or {}
+
+    if isinstance(staff, dict):
+        staff_name = (
+            staff.get("name")
+            or staff.get("title")
+            or "не указан"
+        )
+    else:
+        staff_name = str(staff) if staff else "не указан"
+
+    services = record.get("services") or []
+
+    service_names = []
+
+    if isinstance(services, list):
+        for service in services:
+            if isinstance(service, dict):
+                name = (
+                    service.get("title")
+                    or service.get("name")
+                )
+
+                if name:
+                    service_names.append(str(name))
+
+            elif isinstance(service, str):
+                service_names.append(service)
+
+    service_text = (
+        ", ".join(service_names)
+        if service_names
+        else "занятие"
+    )
+
+    if time_text:
+        when = f"{date_text} в {time_text}"
+    else:
+        when = date_text
+
+    return (
+        f"📅 {when}\n"
+        f"🏊 {service_text}\n"
+        f"👤 Тренер: {staff_name}\n"
+        f"📍 {branch_name}"
+    )
+
+
+def get_future_records_for_clients(client_results):
+    all_records = []
+    errors = []
+
+    for item in client_results:
+        branch_name = item["branch"]
+        company_id = item["company_id"]
+        client = item["client"]
+
+        client_id = client.get("id")
+
+        if not client_id:
+            continue
+
+        result = get_client_records(
+            company_id,
+            client_id,
+        )
+
+        if not result["ok"]:
+            errors.append(
+                (
+                    branch_name,
+                    result["status"],
+                )
+            )
+            continue
+
+        for record in result["records"]:
+            if record.get("deleted") is True:
+                continue
+
+            dt = record_datetime(record)
+
+            if dt:
+                try:
+                    if dt.date() < date.today():
+                        continue
+                except Exception:
+                    pass
+
+            all_records.append(
+                {
+                    "branch": branch_name,
+                    "record": record,
+                    "datetime": dt,
+                }
+            )
+
+    all_records.sort(
+        key=lambda item: (
+            item["datetime"] is None,
+            item["datetime"] or datetime.max,
+        )
+    )
+
+    return all_records, errors
+
+
+# =========================================================
 # ГЛАВНАЯ
-# =========================
+# =========================================================
 
 @app.route("/", methods=["GET"])
 def home():
     return "Kapitan Bulk bot is running", 200
 
 
-# =========================
+# =========================================================
 # YCLIENTS — ПОДКЛЮЧЕНИЕ
-# =========================
+# =========================================================
 
 @app.route("/yclients/connect", methods=["GET"])
 def yclients_connect():
@@ -350,8 +582,7 @@ def yclients_connect():
         )
 
         return (
-            "YCLIENTS не передал salon_id. "
-            "Попробуйте подключить приложение заново.",
+            "YCLIENTS не передал salon_id.",
             400,
         )
 
@@ -373,7 +604,7 @@ def yclients_connect():
 
         except Exception as e:
             print(
-                "YCLIENTS activation error:",
+                "YCLIENTS ACTIVATION ERROR:",
                 current_salon_id,
                 e,
             )
@@ -435,9 +666,9 @@ def yclients_connect():
     )
 
 
-# =========================
+# =========================================================
 # YCLIENTS — WEBHOOK
-# =========================
+# =========================================================
 
 @app.route("/yclients/webhook", methods=["POST"])
 def yclients_webhook():
@@ -451,16 +682,16 @@ def yclients_webhook():
 
     except Exception as e:
         print(
-            "YCLIENTS webhook error:",
+            "YCLIENTS WEBHOOK ERROR:",
             e,
         )
 
         return "ok", 200
 
 
-# =========================
+# =========================================================
 # TELEGRAM WEBHOOK
-# =========================
+# =========================================================
 
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
@@ -480,9 +711,18 @@ def telegram_webhook():
     text = message.get("text", "")
     contact = message.get("contact")
 
+    # -----------------------------------------------------
+    # ПОЛУЧИЛИ НОМЕР ТЕЛЕФОНА
+    # -----------------------------------------------------
+
     if contact:
         phone = normalize_phone(
             contact.get("phone_number", "")
+        )
+
+        action = PENDING_ACTIONS.get(
+            chat_id,
+            "records",
         )
 
         send_message(
@@ -490,63 +730,145 @@ def telegram_webhook():
             "Ищу вас в базе Капитана Булька… 🦭",
         )
 
-        results, errors = find_client_everywhere(phone)
-
-        if results:
-            branches = ", ".join(
-                item["branch"]
-                for item in results
-            )
-
-            names = [
-                item["client"].get("name")
-                for item in results
-                if item["client"].get("name")
-            ]
-
-            name = names[0] if names else "клиент"
-
-            send_message(
-                chat_id,
-                f"Нашла 💙\n\n"
-                f"{name}, вы есть в нашей базе.\n"
-                f"Филиал: {branches}",
-                main_keyboard(),
-            )
-
-            return "ok", 200
-
-        if errors:
-            error_text = "\n".join(
-                f"{branch}: {status}"
-                for branch, status in errors
-            )
-
-            send_message(
-                chat_id,
-                "YCLIENTS пока не дал "
-                "получить клиентскую базу.\n\n"
-                "Коды ответа:\n"
-                f"{error_text}",
-                main_keyboard(),
-            )
-
-            return "ok", 200
-
-        send_message(
-            chat_id,
-            "Не нашла этот номер "
-            "в клиентской базе.\n\n"
-            "Проверьте, что в Telegram "
-            "указан тот же номер, "
-            "который вы оставляли "
-            "при записи.",
-            main_keyboard(),
+        clients, client_errors = (
+            find_client_everywhere(phone)
         )
 
-        return "ok", 200
+        if not clients:
+            if client_errors:
+                error_text = "\n".join(
+                    f"{branch}: {status}"
+                    for branch, status
+                    in client_errors
+                )
+
+                send_message(
+                    chat_id,
+                    "Не удалось получить данные "
+                    "из YCLIENTS.\n\n"
+                    f"Коды ответа:\n{error_text}",
+                    main_keyboard(),
+                )
+
+            else:
+                send_message(
+                    chat_id,
+                    "Не нашла этот номер "
+                    "в клиентской базе.\n\n"
+                    "Проверьте, что в Telegram "
+                    "указан тот же номер, "
+                    "который вы оставляли "
+                    "при записи.",
+                    main_keyboard(),
+                )
+
+            PENDING_ACTIONS.pop(
+                chat_id,
+                None,
+            )
+
+            return "ok", 200
+
+        # -------------------------------------------------
+        # МОИ ЗАПИСИ
+        # -------------------------------------------------
+
+        if action == "records":
+            records, record_errors = (
+                get_future_records_for_clients(
+                    clients
+                )
+            )
+
+            if records:
+                send_message(
+                    chat_id,
+                    "Нашла ваши ближайшие записи 💙",
+                )
+
+                for item in records[:10]:
+                    send_message(
+                        chat_id,
+                        format_record(
+                            item["record"],
+                            item["branch"],
+                        ),
+                    )
+
+                if len(records) > 10:
+                    send_message(
+                        chat_id,
+                        "Показала первые 10 записей.",
+                    )
+
+                send_message(
+                    chat_id,
+                    "Что хотите сделать дальше?",
+                    main_keyboard(),
+                )
+
+            elif record_errors:
+                error_text = "\n".join(
+                    f"{branch}: {status}"
+                    for branch, status
+                    in record_errors
+                )
+
+                send_message(
+                    chat_id,
+                    "Я нашла вас в базе 💙\n\n"
+                    "Но YCLIENTS пока не дал "
+                    "получить ваши записи.\n\n"
+                    f"Коды ответа:\n{error_text}",
+                    main_keyboard(),
+                )
+
+            else:
+                send_message(
+                    chat_id,
+                    "Нашла вас в базе 💙\n\n"
+                    "Будущих записей пока нет.",
+                    main_keyboard(),
+                )
+
+            PENDING_ACTIONS.pop(
+                chat_id,
+                None,
+            )
+
+            return "ok", 200
+
+        # -------------------------------------------------
+        # МОЙ АБОНЕМЕНТ
+        # -------------------------------------------------
+
+        if action == "subscription":
+            send_message(
+                chat_id,
+                "Нашла вас в базе 💙\n\n"
+                "Абонементы подключим следующим "
+                "этапом — сейчас уже работает "
+                "поиск клиента и записей.",
+                main_keyboard(),
+            )
+
+            PENDING_ACTIONS.pop(
+                chat_id,
+                None,
+            )
+
+            return "ok", 200
+
+    # -----------------------------------------------------
+    # START
+    # -----------------------------------------------------
 
     if text == "/start":
+        PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
+
         send_message(
             chat_id,
             "Привет! 🦭\n"
@@ -559,7 +881,16 @@ def telegram_webhook():
 
         return "ok", 200
 
+    # -----------------------------------------------------
+    # ЗАПИСАТЬСЯ
+    # -----------------------------------------------------
+
     if text == "🏊 Записаться":
+        PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
+
         send_message(
             chat_id,
             "Выберите филиал:",
@@ -581,7 +912,15 @@ def telegram_webhook():
 
         return "ok", 200
 
+    # -----------------------------------------------------
+    # МОИ ЗАПИСИ
+    # -----------------------------------------------------
+
     if text == "📅 Мои записи":
+        PENDING_ACTIONS[
+            chat_id
+        ] = "records"
+
         send_message(
             chat_id,
             "Чтобы найти ваши записи, "
@@ -592,7 +931,15 @@ def telegram_webhook():
 
         return "ok", 200
 
+    # -----------------------------------------------------
+    # МОЙ АБОНЕМЕНТ
+    # -----------------------------------------------------
+
     if text == "🎟️ Мой абонемент":
+        PENDING_ACTIONS[
+            chat_id
+        ] = "subscription"
+
         send_message(
             chat_id,
             "Чтобы найти ваш абонемент, "
@@ -603,17 +950,30 @@ def telegram_webhook():
 
         return "ok", 200
 
+    # -----------------------------------------------------
+    # СВЯЗАТЬСЯ
+    # -----------------------------------------------------
+
     if text == "💬 Связаться с нами":
         send_message(
             chat_id,
-            "Напишите нам, и "
-            "администратор поможет вам 💙",
+            "Напишите нам, и администратор "
+            "поможет вам 💙",
             main_keyboard(),
         )
 
         return "ok", 200
 
+    # -----------------------------------------------------
+    # НАЗАД
+    # -----------------------------------------------------
+
     if text == "← Назад":
+        PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
+
         send_message(
             chat_id,
             "Главное меню 🦭",
@@ -630,6 +990,10 @@ def telegram_webhook():
 
     return "ok", 200
 
+
+# =========================================================
+# ЗАПУСК
+# =========================================================
 
 if __name__ == "__main__":
     port = int(

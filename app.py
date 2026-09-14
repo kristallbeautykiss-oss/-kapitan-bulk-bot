@@ -16,7 +16,6 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 YCLIENTS_USER_TOKEN = os.environ["YCLIENTS_USER_TOKEN"]
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
 YCLIENTS_API = "https://api.yclients.ru/api/v1"
 
 
@@ -56,7 +55,7 @@ def send_message(chat_id, text, reply_markup=None):
     requests.post(
         f"{TELEGRAM_API}/sendMessage",
         json=payload,
-        timeout=10
+        timeout=15
     )
 
 
@@ -114,14 +113,12 @@ def phone_keyboard():
 
 
 def booking_button(branch_name):
-    branch = BRANCHES[branch_name]
-
     return {
         "inline_keyboard": [
             [
                 {
                     "text": f"🏊 Записаться — {branch_name}",
-                    "url": branch["booking_url"]
+                    "url": BRANCHES[branch_name]["booking_url"]
                 }
             ]
         ]
@@ -141,7 +138,115 @@ def normalize_phone(phone):
 
 
 # =========================
-# СТРАНИЦА ПРОВЕРКИ RENDER
+# YCLIENTS
+# =========================
+
+def yclients_headers():
+    return {
+        "Authorization": f"Bearer {YCLIENTS_USER_TOKEN}",
+        "Accept": "application/vnd.yclients.v2+json",
+        "Content-Type": "application/json"
+    }
+
+
+def search_client_in_branch(company_id, phone):
+    url = f"{YCLIENTS_API}/company/{company_id}/clients/search"
+
+    body = {
+        "page": 1,
+        "page_size": 10,
+        "fields": [
+            "id",
+            "name",
+            "phone"
+        ],
+        "operation": "AND",
+        "filters": [
+            {
+                "type": "quick_search",
+                "state": {
+                    "value": phone
+                }
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(
+            url,
+            headers=yclients_headers(),
+            json=body,
+            timeout=15
+        )
+
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "status": response.status_code,
+                "clients": []
+            }
+
+        data = response.json()
+
+        clients = []
+
+        if isinstance(data, dict):
+            raw_clients = data.get("data", [])
+
+            if isinstance(raw_clients, dict):
+                raw_clients = raw_clients.get("items", [])
+
+            if isinstance(raw_clients, list):
+                clients = raw_clients
+
+        return {
+            "ok": True,
+            "status": 200,
+            "clients": clients
+        }
+
+    except Exception:
+        return {
+            "ok": False,
+            "status": 0,
+            "clients": []
+        }
+
+
+def find_client_everywhere(phone):
+    found = []
+    errors = []
+
+    for branch_name, branch in BRANCHES.items():
+        result = search_client_in_branch(
+            branch["company_id"],
+            phone
+        )
+
+        if not result["ok"]:
+            errors.append(
+                f'{branch_name}: {result["status"]}'
+            )
+            continue
+
+        for client in result["clients"]:
+            client_phone = normalize_phone(
+                str(client.get("phone", ""))
+            )
+
+            if client_phone == phone:
+                found.append({
+                    "branch": branch_name,
+                    "company_id": branch["company_id"],
+                    "client_id": client.get("id"),
+                    "name": client.get("name") or "Клиент"
+                })
+
+    return found, errors
+
+
+# =========================
+# HEALTH CHECK
 # =========================
 
 @app.route("/", methods=["GET"])
@@ -162,8 +267,7 @@ def telegram_webhook():
     if not message:
         return "ok", 200
 
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
+    chat_id = message.get("chat", {}).get("id")
 
     if not chat_id:
         return "ok", 200
@@ -173,32 +277,70 @@ def telegram_webhook():
 
 
     # -------------------------
-    # ПОЛУЧИЛИ НОМЕР ТЕЛЕФОНА
+    # ПОЛУЧИЛИ ТЕЛЕФОН
     # -------------------------
 
     if contact:
-        phone = normalize_phone(contact.get("phone_number"))
+        phone = normalize_phone(
+            contact.get("phone_number")
+        )
 
         if not phone:
             send_message(
                 chat_id,
-                "Не получилось определить номер телефона. Попробуйте ещё раз.",
+                "Не получилось определить номер телефона.",
                 phone_keyboard()
             )
-
             return "ok", 200
 
         send_message(
             chat_id,
-            "Спасибо! Номер получен ✅\n\n"
-            "Следующим шагом подключаем поиск ваших данных в YCLIENTS 🦭",
-            main_keyboard()
+            "Ищу вас в базе Капитана Булька… 🦭"
         )
 
-        # Здесь следующим шагом подключим:
-        # 1. поиск клиента по телефону во всех 4 филиалах
-        # 2. получение будущих записей
-        # 3. получение информации по абонементу
+        clients, errors = find_client_everywhere(phone)
+
+        if clients:
+            branches = []
+
+            for client in clients:
+                branches.append(
+                    f'• {client["branch"]}'
+                )
+
+            branches_text = "\n".join(branches)
+
+            send_message(
+                chat_id,
+                "Нашёл вас в YCLIENTS ✅\n\n"
+                f"{branches_text}\n\n"
+                "Отлично! Теперь можем подключать "
+                "ваши будущие записи.",
+                main_keyboard()
+            )
+
+        elif errors:
+            error_text = "\n".join(errors)
+
+            send_message(
+                chat_id,
+                "YCLIENTS пока не дал получить клиентскую базу.\n\n"
+                "Коды ответа:\n"
+                f"{error_text}\n\n"
+                "Пришлите мне этот экран — "
+                "по коду сразу поймём, что нужно поправить.",
+                main_keyboard()
+            )
+
+        else:
+            send_message(
+                chat_id,
+                "Не нашёл клиента с таким номером "
+                "ни в одном из четырёх филиалов.\n\n"
+                "Проверьте, что в YCLIENTS указан "
+                "тот же номер телефона.",
+                main_keyboard()
+            )
 
         return "ok", 200
 
@@ -213,10 +355,10 @@ def telegram_webhook():
             "Привет! 🦭\n\n"
             "Я Капитан Бульк — ваш помощник 💙\n\n"
             "Здесь можно записаться на занятие, "
-            "посмотреть свои записи и узнать информацию об абонементе.",
+            "посмотреть свои записи и узнать "
+            "информацию об абонементе.",
             main_keyboard()
         )
-
         return "ok", 200
 
 
@@ -230,16 +372,19 @@ def telegram_webhook():
             "Выберите филиал 👇",
             branch_keyboard()
         )
-
         return "ok", 200
 
 
     # -------------------------
-    # ВЫБОР ФИЛИАЛА
+    # ФИЛИАЛ
     # -------------------------
 
     if text.startswith("📍 "):
-        branch_name = text.replace("📍 ", "", 1).strip()
+        branch_name = text.replace(
+            "📍 ",
+            "",
+            1
+        ).strip()
 
         if branch_name in BRANCHES:
             send_message(
@@ -247,13 +392,6 @@ def telegram_webhook():
                 f"Вы выбрали филиал «{branch_name}» 🦭\n\n"
                 "Нажмите кнопку ниже, чтобы перейти к записи:",
                 booking_button(branch_name)
-            )
-
-        else:
-            send_message(
-                chat_id,
-                "Не получилось определить филиал.",
-                main_keyboard()
             )
 
         return "ok", 200
@@ -270,7 +408,6 @@ def telegram_webhook():
             "поделитесь номером телефона 👇",
             phone_keyboard()
         )
-
         return "ok", 200
 
 
@@ -285,7 +422,6 @@ def telegram_webhook():
             "поделитесь номером телефона 👇",
             phone_keyboard()
         )
-
         return "ok", 200
 
 
@@ -299,7 +435,6 @@ def telegram_webhook():
             "Напишите нам, и администратор поможет вам 💙",
             main_keyboard()
         )
-
         return "ok", 200
 
 
@@ -313,13 +448,8 @@ def telegram_webhook():
             "Главное меню 🦭",
             main_keyboard()
         )
-
         return "ok", 200
 
-
-    # -------------------------
-    # НЕИЗВЕСТНАЯ КОМАНДА
-    # -------------------------
 
     send_message(
         chat_id,

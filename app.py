@@ -148,7 +148,10 @@ def normalize_phone(phone):
 
 def yclients_user_headers():
     return {
-        "Authorization": f"Bearer {YCLIENTS_USER_TOKEN}",
+        "Authorization": (
+            f"Bearer {YCLIENTS_PARTNER_TOKEN}, "
+            f"User {YCLIENTS_USER_TOKEN}"
+        ),
         "Accept": "application/vnd.yclients.v2+json",
         "Content-Type": "application/json",
     }
@@ -384,10 +387,7 @@ def yclients_connect():
             )
 
     success = all(
-        item["status"] in (
-            200,
-            201,
-        )
+        item["status"] in (200, 201)
         for item in activation_results
     )
 
@@ -424,8 +424,7 @@ def yclients_connect():
     )
 
     statuses = ", ".join(
-        f'{item["salon_id"]}: '
-        f'{item["status"]}'
+        f'{item["salon_id"]}: {item["status"]}'
         for item in activation_results
     )
 
@@ -440,20 +439,12 @@ def yclients_connect():
 # YCLIENTS — WEBHOOK
 # =========================
 
-@app.route(
-    "/yclients/webhook",
-    methods=["POST"],
-)
+@app.route("/yclients/webhook", methods=["POST"])
 def yclients_webhook():
     try:
-        data = request.get_json(
-            silent=True
-        )
+        data = request.get_json(silent=True)
 
-        print(
-            "YCLIENTS WEBHOOK RECEIVED"
-        )
-
+        print("YCLIENTS WEBHOOK RECEIVED")
         print(data)
 
         return "ok", 200
@@ -471,14 +462,9 @@ def yclients_webhook():
 # TELEGRAM WEBHOOK
 # =========================
 
-@app.route(
-    "/telegram",
-    methods=["POST"],
-)
+@app.route("/telegram", methods=["POST"])
 def telegram_webhook():
-    update = request.get_json(
-        silent=True
-    ) or {}
+    update = request.get_json(silent=True) or {}
 
     message = update.get("message")
 
@@ -491,34 +477,20 @@ def telegram_webhook():
     if not chat_id:
         return "ok", 200
 
-    text = message.get(
-        "text",
-        ""
-    )
-
+    text = message.get("text", "")
     contact = message.get("contact")
-
-    # ---------- CONTACT ----------
 
     if contact:
         phone = normalize_phone(
-            contact.get(
-                "phone_number",
-                "",
-            )
+            contact.get("phone_number", "")
         )
 
         send_message(
             chat_id,
-            "Ищу вас в базе "
-            "Капитана Булька… 🦭",
+            "Ищу вас в базе Капитана Булька… 🦭",
         )
 
-        results, errors = (
-            find_client_everywhere(
-                phone
-            )
-        )
+        results, errors = find_client_everywhere(phone)
 
         if results:
             branches = ", ".join(
@@ -527,26 +499,17 @@ def telegram_webhook():
             )
 
             names = [
-                item["client"].get(
-                    "name"
-                )
+                item["client"].get("name")
                 for item in results
-                if item["client"].get(
-                    "name"
-                )
+                if item["client"].get("name")
             ]
 
-            name = (
-                names[0]
-                if names
-                else "клиент"
-            )
+            name = names[0] if names else "клиент"
 
             send_message(
                 chat_id,
                 f"Нашла 💙\n\n"
-                f"{name}, вы есть "
-                f"в нашей базе.\n"
+                f"{name}, вы есть в нашей базе.\n"
                 f"Филиал: {branches}",
                 main_keyboard(),
             )
@@ -556,8 +519,7 @@ def telegram_webhook():
         if errors:
             error_text = "\n".join(
                 f"{branch}: {status}"
-                for branch, status
-                in errors
+                for branch, status in errors
             )
 
             send_message(
@@ -584,24 +546,18 @@ def telegram_webhook():
 
         return "ok", 200
 
-    # ---------- START ----------
-
     if text == "/start":
         send_message(
             chat_id,
             "Привет! 🦭\n"
-            "Я Капитан Бульк — "
-            "ваш помощник 💙\n\n"
-            "Здесь можно записаться "
-            "на занятие, посмотреть "
-            "свои записи и узнать "
+            "Я Капитан Бульк — ваш помощник 💙\n\n"
+            "Здесь можно записаться на занятие, "
+            "посмотреть свои записи и узнать "
             "информацию об абонементе.",
             main_keyboard(),
         )
 
         return "ok", 200
-
-    # ---------- BOOKING ----------
 
     if text == "🏊 Записаться":
         send_message(
@@ -617,16 +573,13 @@ def telegram_webhook():
 
         send_message(
             chat_id,
-            f"Вы выбрали филиал "
-            f"«{text}» 💙",
+            f"Вы выбрали филиал «{text}» 💙",
             booking_button(
                 branch["booking_url"]
             ),
         )
 
         return "ok", 200
-
-    # ---------- MY RECORDS ----------
 
     if text == "📅 Мои записи":
         send_message(
@@ -639,8 +592,6 @@ def telegram_webhook():
 
         return "ok", 200
 
-    # ---------- SUBSCRIPTION ----------
-
     if text == "🎟️ Мой абонемент":
         send_message(
             chat_id,
@@ -652,8 +603,6 @@ def telegram_webhook():
 
         return "ok", 200
 
-    # ---------- CONTACT US ----------
-
     if text == "💬 Связаться с нами":
         send_message(
             chat_id,
@@ -663,8 +612,6 @@ def telegram_webhook():
         )
 
         return "ok", 200
-
-    # ---------- BACK ----------
 
     if text == "← Назад":
         send_message(
@@ -677,17 +624,12 @@ def telegram_webhook():
 
     send_message(
         chat_id,
-        "Выберите нужный пункт "
-        "в меню 👇",
+        "Выберите нужный пункт в меню 👇",
         main_keyboard(),
     )
 
     return "ok", 200
 
-
-# =========================
-# ЗАПУСК
-# =========================
 
 if __name__ == "__main__":
     port = int(

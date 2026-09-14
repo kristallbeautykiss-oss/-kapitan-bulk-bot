@@ -44,6 +44,21 @@ BRANCH_KEYBOARD = {
 }
 
 
+PHONE_KEYBOARD = {
+    "keyboard": [
+        [
+            {
+                "text": "📱 Поделиться номером",
+                "request_contact": True
+            }
+        ],
+        [{"text": "← Назад"}]
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": True
+}
+
+
 def send_message(chat_id, text, keyboard=None, inline_keyboard=None):
     payload = {
         "chat_id": chat_id,
@@ -82,8 +97,19 @@ def telegram_webhook():
 
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
+    contact = message.get("contact")
 
-    if text == "/start":
+    if contact:
+        phone = contact.get("phone_number", "")
+
+        send_message(
+            chat_id,
+            f"Спасибо! Номер получен: {phone}\n\n"
+            "Теперь подключим поиск клиента в YCLIENTS 🦭",
+            MAIN_KEYBOARD
+        )
+
+    elif text == "/start":
         send_message(
             chat_id,
             "Привет! 🦭\n"
@@ -124,23 +150,12 @@ def telegram_webhook():
                     ]
                 ]
             )
-        else:
-            send_message(
-                chat_id,
-                "Не удалось найти этот филиал.",
-                BRANCH_KEYBOARD
-            )
 
-    elif text == "🎟 Мой абонемент":
+    elif text in ["🎟 Мой абонемент", "📅 Мои записи"]:
         send_message(
             chat_id,
-            "Скоро здесь можно будет посмотреть остаток занятий по абонементу 🦭"
-        )
-
-    elif text == "📅 Мои записи":
-        send_message(
-            chat_id,
-            "Скоро здесь будут отображаться ваши ближайшие записи 🦭"
+            "Чтобы найти вас в YCLIENTS, поделитесь номером телефона 👇",
+            PHONE_KEYBOARD
         )
 
     elif text == "💬 Связаться с нами":

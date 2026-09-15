@@ -4527,11 +4527,11 @@ def telegram_webhook():
             "📍 Нагатинская — "
             "@Bulk_nagatinskaya\n"
             "📍 Беломорская — "
-            "@Bulk_levoberezhny\n"
-            "📍 Базовская — "
             "@Bulk_belomorskaya\n"
+            "📍 Базовская — "
+            "@Bulk_bazovskaya\n"
             "📍 Истринская — "
-            "@Bulk_molodezhnaia",
+            "@Bulk_istr",
             main_keyboard(),
         )
 

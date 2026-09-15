@@ -2411,75 +2411,65 @@ def yclients_webhook():
             or {}
         )
 
-    # Ищем телефон клиента во всех структурах,
-    # которые YCLIENTS присылает для записи.
+    # Берём телефон строго у клиента этой записи.
+    # В webhook YCLIENTS клиент записи находится в data.clients.
     phone = ""
 
-    def extract_client_phone(value):
-        if isinstance(
-            value,
-            dict,
-        ):
-            direct_phone = value.get(
-                "phone"
-            )
-
-            if direct_phone:
-                return direct_phone
-
-            nested_client = value.get(
-                "client"
-            )
-
-            nested_phone = (
-                extract_client_phone(
-                    nested_client
-                )
-            )
-
-            if nested_phone:
-                return nested_phone
-
-            clients = value.get(
-                "clients"
-            )
-
-            nested_phone = (
-                extract_client_phone(
-                    clients
-                )
-            )
-
-            if nested_phone:
-                return nested_phone
-
-        elif isinstance(
-            value,
-            list,
-        ):
-            for item in value:
-                nested_phone = (
-                    extract_client_phone(
-                        item
-                    )
-                )
-
-                if nested_phone:
-                    return nested_phone
-
-        return ""
-
-    phone = extract_client_phone(
-        record
+    webhook_data = (
+        data.get(
+            "data"
+        )
+        or {}
     )
 
-    if not phone:
-        phone = extract_client_phone(
-            data.get(
-                "data"
+    clients = webhook_data.get(
+        "clients"
+    ) or []
+
+    if isinstance(
+        clients,
+        list,
+    ):
+        for item in clients:
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            client_data = (
+                item.get(
+                    "client"
+                )
+                or item
             )
-            or {}
+
+            if isinstance(
+                client_data,
+                dict,
+            ):
+                phone = client_data.get(
+                    "phone",
+                    "",
+                )
+
+                if phone:
+                    break
+
+    # Запасной вариант: клиент может прийти как data.client.
+    if not phone:
+        client_data = webhook_data.get(
+            "client"
         )
+
+        if isinstance(
+            client_data,
+            dict,
+        ):
+            phone = client_data.get(
+                "phone",
+                "",
+            )
 
     # Временная безопасная диагностика:
     # показываем только последние 4 цифры номера.

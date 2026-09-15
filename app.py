@@ -2411,76 +2411,75 @@ def yclients_webhook():
             or {}
         )
 
-    # Ищем телефон клиента в полной записи.
+    # Ищем телефон клиента во всех структурах,
+    # которые YCLIENTS присылает для записи.
     phone = ""
 
-    client = record.get(
-        "client"
-    )
-
-    if isinstance(
-        client,
-        dict,
-    ):
-        phone = client.get(
-            "phone",
-            "",
-        )
-
-    elif isinstance(
-        client,
-        list,
-    ):
-        for item in client:
-            if isinstance(
-                item,
-                dict,
-            ) and item.get(
-                "phone"
-            ):
-                phone = item.get(
-                    "phone"
-                )
-                break
-
-    # Если API записи не вернул телефон,
-    # пробуем взять его прямо из webhook.
-    if not phone:
-        webhook_client = (
-            (
-                data.get(
-                    "data"
-                )
-                or {}
-            ).get(
-                "client"
-            )
-        )
-
+    def extract_client_phone(value):
         if isinstance(
-            webhook_client,
+            value,
             dict,
         ):
-            phone = webhook_client.get(
-                "phone",
-                "",
+            direct_phone = value.get(
+                "phone"
             )
 
+            if direct_phone:
+                return direct_phone
+
+            nested_client = value.get(
+                "client"
+            )
+
+            nested_phone = (
+                extract_client_phone(
+                    nested_client
+                )
+            )
+
+            if nested_phone:
+                return nested_phone
+
+            clients = value.get(
+                "clients"
+            )
+
+            nested_phone = (
+                extract_client_phone(
+                    clients
+                )
+            )
+
+            if nested_phone:
+                return nested_phone
+
         elif isinstance(
-            webhook_client,
+            value,
             list,
         ):
-            for item in webhook_client:
-                if isinstance(
-                    item,
-                    dict,
-                ) and item.get(
-                    "phone"
-                ):
-                    phone = item.get(
-                        "phone"
+            for item in value:
+                nested_phone = (
+                    extract_client_phone(
+                        item
                     )
-                    break
+                )
+
+                if nested_phone:
+                    return nested_phone
+
+        return ""
+
+    phone = extract_client_phone(
+        record
+    )
+
+    if not phone:
+        phone = extract_client_phone(
+            data.get(
+                "data"
+            )
+            or {}
+        )
 
     user = (
         get_saved_user_by_phone(

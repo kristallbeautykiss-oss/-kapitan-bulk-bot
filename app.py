@@ -1337,6 +1337,12 @@ def confirm_yclients_record(
             record.get("datetime")
             or record.get("date"),
 
+        # В YCLIENTS статус визита:
+        # 0 = ожидание, 1 = пришёл, -1 = не пришёл, 2 = подтвердил.
+        # confirmed=1 — только технический флаг записи.
+        "attendance":
+            2,
+
         "confirmed":
             1,
     }

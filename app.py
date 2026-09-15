@@ -2311,7 +2311,6 @@ def format_new_record_notification(
     return (
         "🦭 Запись создана!\n\n"
         "Ждём вас в «Капитан Бульк!» 💙\n\n"
-        f"👶 {client_name}\n"
         f"📅 {date_text} в {time_text}\n"
         "🏊 Индивидуальная тренировка\n"
         f"⏱ Длительность: "
@@ -2422,7 +2421,6 @@ def format_transfer_notification(
     return (
         "🔄 Запись перенесена!\n\n"
         "Ваша запись в «Капитан Бульк!» перенесена 💙\n\n"
-        f"👶 {client_name}\n"
         f"📅 Новая дата: {date_text} в {time_text}\n"
         "🏊 Индивидуальная тренировка\n"
         f"⏱ Длительность: "
@@ -2533,7 +2531,6 @@ def format_admin_cancel_notification(
     return (
         "🦭 Занятие отменено\n\n"
         "Ваша запись в «Капитан Бульк!» отменена.\n\n"
-        f"👶 {client_name}\n"
         f"📅 {date_text} в {time_text}\n"
         "🏊 Индивидуальная тренировка\n"
         f"⏱ Длительность: "
@@ -4305,16 +4302,8 @@ def telegram_webhook():
         )
 
         if saved_user:
-            name = (
-                saved_user.get(
-                    "name"
-                )
-            )
-
             greeting = (
-                f"С возвращением"
-                f"{', ' + name if name else ''}! "
-                "🦭💙\n\n"
+                "С возвращением! 🦭💙\n\n"
                 "Я уже помню ваш номер — "
                 "повторно отправлять "
                 "его не нужно."
@@ -4488,13 +4477,6 @@ def telegram_webhook():
                 200,
             )
 
-        name = (
-            saved_user.get(
-                "name"
-            )
-            or "не указано"
-        )
-
         phone = (
             saved_user.get(
                 "phone"
@@ -4504,7 +4486,6 @@ def telegram_webhook():
         send_message(
             chat_id,
             "⚙️ Мои данные\n\n"
-            f"👤 Имя: {name}\n"
             f"📱 Телефон: "
             f"{masked_phone(phone)}",
             user_data_keyboard(),

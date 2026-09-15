@@ -108,6 +108,10 @@ BRANCHES = {
 
 PENDING_ACTIONS = {}
 
+# Записи, которые прямо сейчас отменяются самим клиентом через Telegram.
+# Нужны, чтобы webhook YCLIENTS не прислал второе уведомление об отмене.
+BOT_CANCELLED_RECORDS = set()
+
 
 # =========================================================
 # TELEGRAM
@@ -328,6 +332,41 @@ def booking_button(url):
                 {
                     "text":
                         "Записаться онлайн",
+                    "url":
+                        url,
+                }
+            ]
+        ]
+    }
+
+
+def rebook_button(
+    company_id,
+):
+    branch_name = (
+        branch_name_by_company_id(
+            company_id
+        )
+    )
+
+    branch = BRANCHES.get(
+        branch_name,
+        {},
+    )
+
+    url = branch.get(
+        "booking_url"
+    )
+
+    if not url:
+        return None
+
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text":
+                        "🏊 Записаться снова",
                     "url":
                         url,
                 }
@@ -1825,6 +1864,116 @@ def format_new_record_notification(
     )
 
 
+def format_admin_cancel_notification(
+    record,
+    branch_name,
+):
+    dt = record_datetime(
+        record
+    )
+
+    if dt:
+        date_text = dt.strftime(
+            "%d.%m.%Y"
+        )
+        time_text = dt.strftime(
+            "%H:%M"
+        )
+    else:
+        date_text = "дата не указана"
+        time_text = "время не указано"
+
+    address = (
+        BRANCHES
+        .get(
+            branch_name,
+            {},
+        )
+        .get(
+            "address",
+            branch_name,
+        )
+    )
+
+    client_name = ""
+
+    clients = record.get(
+        "clients"
+    ) or []
+
+    if isinstance(
+        clients,
+        list,
+    ):
+        for item in clients:
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            client_data = (
+                item.get(
+                    "client"
+                )
+                or item
+            )
+
+            if isinstance(
+                client_data,
+                dict,
+            ):
+                client_name = (
+                    client_data.get(
+                        "name"
+                    )
+                    or client_data.get(
+                        "display_name"
+                    )
+                    or ""
+                )
+
+                if client_name:
+                    break
+
+    if not client_name:
+        client_data = record.get(
+            "client"
+        )
+
+        if isinstance(
+            client_data,
+            dict,
+        ):
+            client_name = (
+                client_data.get(
+                    "name"
+                )
+                or client_data.get(
+                    "display_name"
+                )
+                or ""
+            )
+
+    if not client_name:
+        client_name = "Клиент"
+
+    return (
+        "🦭 Занятие отменено\n\n"
+        "Ваша запись в «Капитан Бульк!» отменена.\n\n"
+        f"👶 {client_name}\n"
+        f"📅 {date_text} в {time_text}\n"
+        "🏊 Индивидуальная тренировка\n"
+        f"⏱ Длительность: "
+        f"{format_duration(record)}\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
+        f"📍 {address}\n\n"
+        "Будем рады видеть вас в другой день 💙\n\n"
+        "До встречи в бассейне! 🦭💦"
+    )
+
+
 def format_reminder(
     record,
     branch_name,
@@ -2357,16 +2506,23 @@ def yclients_webhook():
         data,
     )
 
-    # Нас интересует только создание новой записи.
-    if not (
-        data.get(
-            "resource"
+    resource = data.get(
+        "resource"
+    )
+
+    status = data.get(
+        "status"
+    )
+
+    if resource != "record":
+        return (
+            "ok",
+            200,
         )
-        == "record"
-        and data.get(
-            "status"
-        )
-        == "create"
+
+    if status not in (
+        "create",
+        "delete",
     ):
         return (
             "ok",
@@ -2422,7 +2578,7 @@ def yclients_webhook():
 
     if not branch_name:
         print(
-            "NEW RECORD WEBHOOK: "
+            "RECORD WEBHOOK: "
             "unknown branch",
             company_id,
         )
@@ -2430,6 +2586,141 @@ def yclients_webhook():
             "ok",
             200,
         )
+
+    # -----------------------------------------------------
+    # ОТМЕНА АДМИНИСТРАТОРОМ В YCLIENTS
+    # -----------------------------------------------------
+    if status == "delete":
+        cancel_key = (
+            int(company_id),
+            int(record_id),
+        )
+
+        # Если удаление запустил сам клиент кнопкой Telegram,
+        # отдельное уведомление не отправляем.
+        if cancel_key in BOT_CANCELLED_RECORDS:
+            print(
+                "DELETE WEBHOOK: "
+                "cancelled via Telegram, skipped",
+                company_id,
+                record_id,
+            )
+            return (
+                "ok",
+                200,
+            )
+
+        record = webhook_data
+
+        # Телефон берём строго у клиента удалённой записи.
+        phone = ""
+
+        clients = record.get(
+            "clients"
+        ) or []
+
+        if isinstance(
+            clients,
+            list,
+        ):
+            for item in clients:
+                if not isinstance(
+                    item,
+                    dict,
+                ):
+                    continue
+
+                client_data = (
+                    item.get(
+                        "client"
+                    )
+                    or item
+                )
+
+                if isinstance(
+                    client_data,
+                    dict,
+                ):
+                    phone = client_data.get(
+                        "phone",
+                        "",
+                    )
+
+                    if phone:
+                        break
+
+        if not phone:
+            client_data = record.get(
+                "client"
+            )
+
+            if isinstance(
+                client_data,
+                dict,
+            ):
+                phone = client_data.get(
+                    "phone",
+                    "",
+                )
+
+        user = (
+            get_saved_user_by_phone(
+                phone
+            )
+            if phone
+            else None
+        )
+
+        if not user:
+            print(
+                "DELETE WEBHOOK: "
+                "Telegram user not found"
+            )
+            return (
+                "ok",
+                200,
+            )
+
+        chat_id = user.get(
+            "chat_id"
+        )
+
+        if not chat_id:
+            return (
+                "ok",
+                200,
+            )
+
+        response = send_message(
+            chat_id,
+            format_admin_cancel_notification(
+                record,
+                branch_name,
+            ),
+            rebook_button(
+                company_id
+            ),
+        )
+
+        print(
+            "ADMIN CANCEL NOTIFICATION:",
+            company_id,
+            record_id,
+            (
+                response.status_code
+                if response
+                else "no response"
+            ),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+    # -----------------------------------------------------
+    # СОЗДАНИЕ НОВОЙ ЗАПИСИ
+    # -----------------------------------------------------
 
     # Получаем полную запись: в webhook YCLIENTS
     # часть полей может отсутствовать.
@@ -3004,12 +3295,28 @@ def handle_callback_query(
 
             return
 
+        cancel_key = (
+            int(company_id),
+            int(record_id),
+        )
+
+        # Ставим метку ДО запроса DELETE, потому что YCLIENTS
+        # может прислать webhook удаления очень быстро.
+        BOT_CANCELLED_RECORDS.add(
+            cancel_key
+        )
+
         success = (
             delete_yclients_record(
                 company_id,
                 record_id,
             )
         )
+
+        if not success:
+            BOT_CANCELLED_RECORDS.discard(
+                cancel_key
+            )
 
         if success:
             update_reminder_row(

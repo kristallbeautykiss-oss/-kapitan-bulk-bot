@@ -1997,12 +1997,17 @@ def scan_and_send_reminders():
             ):
                 continue
 
+            # Показываем кнопку подтверждения, пока клиент
+            # не подтвердил запись именно через Telegram-бота.
+            # YCLIENTS confirmed не используем для скрытия кнопки.
             already_confirmed = (
                 bool(
-                    record.get(
+                    existing.get(
                         "confirmed"
                     )
                 )
+                if existing
+                else False
             )
 
             response = send_message(

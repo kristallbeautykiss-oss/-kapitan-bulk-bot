@@ -67,7 +67,7 @@ BRANCHES = {
         "address":
             "Нагатинская, 16",
         "admin":
-            "@Bulk_Nagatino",
+            "@Bulk_nagatinskaya",
     },
 
     "Беломорская": {
@@ -77,7 +77,7 @@ BRANCHES = {
         "address":
             "Беломорская, 9",
         "admin":
-            "@Bulk_hovrino",
+            "@Bulk_belomorskaya",
     },
 
     "Базовская": {
@@ -87,7 +87,7 @@ BRANCHES = {
         "address":
             "Базовская, 15А",
         "admin":
-            "@Bulk_zapad",
+            "@Bulk_bazovskaya",
     },
 
     "Истринская": {
@@ -97,7 +97,7 @@ BRANCHES = {
         "address":
             "Истринская, 5",
         "admin":
-            "@Bulk_Istra",
+            "@Bulk_istr",
     },
 }
 
@@ -4548,7 +4548,7 @@ def telegram_webhook():
             "📍 Беломорская — "
             "@Bulk_levoberezhny\n"
             "📍 Базовская — "
-            "@Bulk_hovrino\n"
+            "@Bulk_belomorskaya\n"
             "📍 Истринская — "
             "@Bulk_molodezhnaia",
             main_keyboard(),

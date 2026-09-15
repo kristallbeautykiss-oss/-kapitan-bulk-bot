@@ -2704,251 +2704,93 @@ def yclients_webhook():
     # -----------------------------------------------------
     if status == "update":
         record = webhook_data
+        new_dt = record_datetime(record)
 
-        # Сравниваем новую дату/время с тем, что бот уже знает
-        # об этой записи. Уведомляем только при реальном переносе,
-        # а не при смене комментария или статуса.
-        new_dt = record_datetime(
-            record
-        )
+        phone = ""
+        clients = record.get("clients") or []
 
-        existing = get_reminder_row(
-            company_id,
-            record_id,
-        )
+        if isinstance(clients, list):
+            for item in clients:
+                if not isinstance(item, dict):
+                    continue
+                client_data = item.get("client") or item
+                if isinstance(client_data, dict):
+                    phone = client_data.get("phone", "")
+                    if phone:
+                        break
 
+        if not phone:
+            client_data = record.get("client")
+            if isinstance(client_data, dict):
+                phone = client_data.get("phone", "")
+
+        user = get_saved_user_by_phone(phone) if phone else None
+
+        if not user:
+            print("TRANSFER WEBHOOK: Telegram user not found")
+            return ("ok", 200)
+
+        chat_id = user.get("chat_id")
+        if not chat_id or not new_dt:
+            return ("ok", 200)
+
+        existing = get_reminder_row(company_id, record_id)
         old_dt = None
 
-        if (
-            existing
-            and existing.get(
-                "record_datetime"
-            )
-        ):
+        if existing and existing.get("record_datetime"):
             try:
-                old_value = str(
-                    existing.get(
-                        "record_datetime"
-                    )
-                ).replace(
-                    "Z",
-                    "+00:00",
-                )
-
-                old_dt = datetime.fromisoformat(
-                    old_value
-                )
-
+                value = str(existing.get("record_datetime")).replace("Z", "+00:00")
+                old_dt = datetime.fromisoformat(value)
                 if old_dt.tzinfo is None:
-                    old_dt = old_dt.replace(
-                        tzinfo=MOSCOW_TZ
-                    )
-
-                old_dt = old_dt.astimezone(
-                    MOSCOW_TZ
-                )
-
+                    old_dt = old_dt.replace(tzinfo=MOSCOW_TZ)
+                old_dt = old_dt.astimezone(MOSCOW_TZ)
             except Exception as e:
-                print(
-                    "TRANSFER OLD DATETIME ERROR:",
-                    e,
+                print("TRANSFER OLD DATETIME ERROR:", e)
+
+        changed_time = (
+            old_dt is None
+            or abs((new_dt - old_dt).total_seconds()) >= 60
+        )
+
+        if not changed_time:
+            return ("ok", 200)
+
+        response = send_message(
+            chat_id,
+            format_transfer_notification(record, branch_name),
+            new_record_buttons(company_id, record_id),
+        )
+
+        if response and response.status_code == 200:
+            if existing:
+                update_reminder_row(
+                    company_id,
+                    record_id,
+                    {
+                        "chat_id": int(chat_id),
+                        "record_datetime": new_dt.isoformat(),
+                        "reminder_sent": False,
+                        "confirmed": False,
+                    },
                 )
-
-        # Если записи ещё нет в нашей таблице, сохраняем её
-        # как исходное состояние и ничего клиенту не отправляем.
-        if not existing:
-            phone = ""
-
-            clients = record.get(
-                "clients"
-            ) or []
-
-            if isinstance(
-                clients,
-                list,
-            ):
-                for item in clients:
-                    if not isinstance(
-                        item,
-                        dict,
-                    ):
-                        continue
-
-                    client_data = (
-                        item.get(
-                            "client"
-                        )
-                        or item
-                    )
-
-                    if isinstance(
-                        client_data,
-                        dict,
-                    ):
-                        phone = client_data.get(
-                            "phone",
-                            "",
-                        )
-
-                        if phone:
-                            break
-
-            user = (
-                get_saved_user_by_phone(
-                    phone
-                )
-                if phone
-                else None
-            )
-
-            if user and new_dt:
+            else:
                 create_reminder_row(
                     company_id,
                     record_id,
-                    user.get(
-                        "chat_id"
-                    ),
+                    chat_id,
                     new_dt.isoformat(),
                     reminder_sent=False,
                     confirmed=False,
                 )
 
-            print(
-                "UPDATE WEBHOOK: baseline saved, "
-                "no transfer notification",
-                company_id,
-                record_id,
-            )
-
-            return (
-                "ok",
-                200,
-            )
-
-        # Нет изменения даты/времени — это не перенос.
-        if (
-            not new_dt
-            or not old_dt
-            or abs(
-                (
-                    new_dt - old_dt
-                ).total_seconds()
-            ) < 60
-        ):
-            return (
-                "ok",
-                200,
-            )
-
-        phone = ""
-
-        clients = record.get(
-            "clients"
-        ) or []
-
-        if isinstance(
-            clients,
-            list,
-        ):
-            for item in clients:
-                if not isinstance(
-                    item,
-                    dict,
-                ):
-                    continue
-
-                client_data = (
-                    item.get(
-                        "client"
-                    )
-                    or item
-                )
-
-                if isinstance(
-                    client_data,
-                    dict,
-                ):
-                    phone = client_data.get(
-                        "phone",
-                        "",
-                    )
-
-                    if phone:
-                        break
-
-        user = (
-            get_saved_user_by_phone(
-                phone
-            )
-            if phone
-            else None
-        )
-
-        if not user:
-            print(
-                "TRANSFER WEBHOOK: "
-                "Telegram user not found"
-            )
-            return (
-                "ok",
-                200,
-            )
-
-        chat_id = user.get(
-            "chat_id"
-        )
-
-        response = send_message(
-            chat_id,
-            format_transfer_notification(
-                record,
-                branch_name,
-            ),
-            new_record_buttons(
-                company_id,
-                record_id,
-            ),
-        )
-
-        if (
-            response
-            and response.status_code == 200
-        ):
-            update_reminder_row(
-                company_id,
-                record_id,
-                {
-                    "chat_id":
-                        int(chat_id),
-
-                    "record_datetime":
-                        new_dt.isoformat(),
-
-                    # После переноса напоминание за сутки
-                    # должно иметь возможность уйти заново.
-                    "reminder_sent":
-                        False,
-
-                    "confirmed":
-                        False,
-                },
-            )
-
         print(
             "TRANSFER NOTIFICATION:",
             company_id,
             record_id,
-            (
-                response.status_code
-                if response
-                else "no response"
-            ),
+            response.status_code if response else "no response",
         )
 
-        return (
-            "ok",
-            200,
-        )
+        return ("ok", 200)
 
 
     # -----------------------------------------------------

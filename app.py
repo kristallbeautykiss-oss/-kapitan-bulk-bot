@@ -1177,76 +1177,83 @@ def get_client_name(
 
 
 # =========================================================
-# YCLIENTS — ТЕСТ АБОНЕМЕНТОВ / ЛОЯЛЬНОСТИ
+# YCLIENTS — ТЕСТ НАСТОЯЩИХ АБОНЕМЕНТОВ
 # =========================================================
 
-def test_client_loyalty_cards(
+def test_client_abonements(
+    company_id,
     client_id,
 ):
     """
-    Временная проверка API лояльности YCLIENTS.
-    Полный ответ пишем только в Render Logs.
-    В Telegram возвращаем только безопасный результат проверки.
+    Временная диагностика API абонементов.
+    Пробуем только GET-запросы: ничего в YCLIENTS не меняем.
+    Ответы видны в Render Logs.
     """
-    url = (
-        f"{YCLIENTS_API}"
-        f"/loyalty/client_cards/"
-        f"{client_id}"
-    )
+    candidates = [
+        (
+            f"{YCLIENTS_API}/loyalty/abonements",
+            {
+                "client_id": client_id,
+                "company_id": company_id,
+            },
+        ),
+        (
+            f"{YCLIENTS_API}/user/loyalty/abonements",
+            {
+                "client_id": client_id,
+                "company_id": company_id,
+            },
+        ),
+    ]
 
-    try:
-        response = requests.get(
-            url,
-            headers=yclients_user_headers(),
-            timeout=30,
-        )
+    results = []
 
-        print(
-            "LOYALTY CLIENT CARDS TEST:",
-            "client_id=",
-            client_id,
-            "status=",
-            response.status_code,
-            "body=",
-            response.text[:5000],
-        )
+    for url, params in candidates:
+        try:
+            response = requests.get(
+                url,
+                headers=yclients_user_headers(),
+                params=params,
+                timeout=30,
+            )
 
-        return {
-            "ok":
-                response.status_code == 200,
-
-            "status":
+            print(
+                "ABONEMENT API TEST:",
+                "url=",
+                response.url,
+                "status=",
                 response.status_code,
+                "body=",
+                response.text[:7000],
+            )
 
-            "data":
-                (
-                    response.json()
-                    if response.text
-                    else {}
-                ),
-        }
+            results.append({
+                "url": response.url,
+                "status": response.status_code,
+            })
 
-    except Exception as e:
-        print(
-            "LOYALTY CLIENT CARDS TEST ERROR:",
-            client_id,
-            e,
-        )
+        except Exception as e:
+            print(
+                "ABONEMENT API TEST ERROR:",
+                url,
+                e,
+            )
 
-        return {
-            "ok": False,
-            "status": "error",
-            "data": {},
-        }
+            results.append({
+                "url": url,
+                "status": "error",
+            })
+
+    return results
 
 
-def test_subscription_for_phone(
+def test_abonements_for_phone(
     chat_id,
     phone,
 ):
     send_message(
         chat_id,
-        "Проверяю абонемент в YCLIENTS… 🎟️",
+        "Проверяю именно абонементы в YCLIENTS… 🎟️",
     )
 
     clients, errors = find_client_everywhere(
@@ -1263,74 +1270,36 @@ def test_subscription_for_phone(
         return
 
     tested = 0
-    success = 0
-    cards_found = 0
 
     for item in clients:
+        company_id = item.get(
+            "company_id"
+        )
+
         client_id = (
             item.get("client", {})
             .get("id")
         )
 
-        if not client_id:
+        if not company_id or not client_id:
             continue
 
         tested += 1
 
-        result = test_client_loyalty_cards(
-            client_id
+        test_client_abonements(
+            company_id,
+            client_id,
         )
 
-        if not result.get("ok"):
-            continue
-
-        success += 1
-
-        payload = result.get("data")
-
-        if isinstance(payload, dict):
-            payload = payload.get(
-                "data",
-                payload,
-            )
-
-        if isinstance(payload, list):
-            cards_found += len(payload)
-
-        elif isinstance(payload, dict):
-            for key in (
-                "cards",
-                "items",
-                "client_cards",
-            ):
-                value = payload.get(key)
-                if isinstance(value, list):
-                    cards_found += len(value)
-                    break
-
-    if success:
-        send_message(
-            chat_id,
-            "Тест прошёл 💙\n\n"
-            f"YCLIENTS ответил успешно. "
-            f"Найдено объектов лояльности: "
-            f"{cards_found}.\n\n"
-            "Теперь открой Render → Logs "
-            "и пришли мне скрин строк "
-            "«LOYALTY CLIENT CARDS TEST».",
-            main_keyboard(),
-        )
-    else:
-        send_message(
-            chat_id,
-            "YCLIENTS пока не отдал данные "
-            "по этому методу.\n\n"
-            "Открой Render → Logs и пришли "
-            "мне скрин строки "
-            "«LOYALTY CLIENT CARDS TEST» — "
-            "по коду ответа поймём следующий шаг.",
-            main_keyboard(),
-        )
+    send_message(
+        chat_id,
+        "Проверка закончена 💙\n\n"
+        "Теперь открой Render → Logs и найди "
+        "строки «ABONEMENT API TEST». "
+        "Пришли мне скрин — по ответу сразу "
+        "увидим правильный метод.",
+        main_keyboard(),
+    )
 
 
 # =========================================================
@@ -4133,7 +4102,7 @@ def telegram_webhook():
                 "phone"
             )
         ):
-            test_subscription_for_phone(
+            test_abonements_for_phone(
                 chat_id,
                 saved_user[
                     "phone"
@@ -4240,13 +4209,13 @@ def telegram_webhook():
             "Выберите нужный филиал "
             "и напишите администратору:\n\n"
             "📍 Нагатинская — "
-            "@Bulk_Nagatino\n"
+            "@Bulk_nagatinskaya\n"
             "📍 Беломорская — "
-            "@Bulk_hovrino\n"
+            "@Bulk_levoberezhny\n"
             "📍 Базовская — "
-            "@Bulk_zapad\n"
+            "@Bulk_hovrino\n"
             "📍 Истринская — "
-            "@Bulk_Istra",
+            "@Bulk_molodezhnaia",
             main_keyboard(),
         )
 

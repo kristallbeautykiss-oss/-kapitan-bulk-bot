@@ -2339,8 +2339,20 @@ def yclients_webhook():
         )
 
     try:
-        company_id = int(
+        webhook_data = (
             data.get(
+                "data"
+            )
+            or {}
+        )
+
+        # В webhook YCLIENTS company_id приходит внутри data.
+        # Оставляем запасной вариант и для верхнего уровня.
+        company_id = int(
+            webhook_data.get(
+                "company_id"
+            )
+            or data.get(
                 "company_id"
             )
         )
@@ -2349,12 +2361,7 @@ def yclients_webhook():
             data.get(
                 "resource_id"
             )
-            or (
-                data.get(
-                    "data"
-                )
-                or {}
-            ).get(
+            or webhook_data.get(
                 "id"
             )
         )

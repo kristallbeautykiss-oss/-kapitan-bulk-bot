@@ -1724,11 +1724,15 @@ def format_new_record_notification(
     )
 
     if dt:
-        when = dt.strftime(
-            "%d.%m.%Y в %H:%M"
+        date_text = dt.strftime(
+            "%d.%m.%Y"
+        )
+        time_text = dt.strftime(
+            "%H:%M"
         )
     else:
-        when = "время не указано"
+        date_text = "дата не указана"
+        time_text = "время не указано"
 
     branch = BRANCHES.get(
         branch_name,
@@ -1740,53 +1744,84 @@ def format_new_record_notification(
         branch_name,
     )
 
-    services = record.get(
-        "services"
+    # Имя клиента из записи YCLIENTS.
+    client_name = ""
+
+    clients = record.get(
+        "clients"
     ) or []
 
-    service_titles = []
-
     if isinstance(
-        services,
+        clients,
         list,
     ):
-        for service in services:
-            if isinstance(
-                service,
+        for item in clients:
+            if not isinstance(
+                item,
                 dict,
             ):
-                title = service.get(
-                    "title"
+                continue
+
+            client_data = (
+                item.get(
+                    "client"
+                )
+                or item
+            )
+
+            if isinstance(
+                client_data,
+                dict,
+            ):
+                client_name = (
+                    client_data.get(
+                        "name"
+                    )
+                    or client_data.get(
+                        "display_name"
+                    )
+                    or ""
                 )
 
-                if title:
-                    service_titles.append(
-                        str(title)
-                    )
+                if client_name:
+                    break
 
-    service_name = (
-        ", ".join(
-            service_titles
+    if not client_name:
+        client_data = record.get(
+            "client"
         )
-        if service_titles
-        else "Индивидуальная тренировка"
-    )
+
+        if isinstance(
+            client_data,
+            dict,
+        ):
+            client_name = (
+                client_data.get(
+                    "name"
+                )
+                or client_data.get(
+                    "display_name"
+                )
+                or ""
+            )
+
+    if not client_name:
+        client_name = "Клиент"
 
     return (
-        "🦭 Вы записаны к "
-        "Капитану Бульку!\n\n"
-        f"🗓 {when}\n"
-        f"🏊 {service_name}\n"
-        f"👤 Тренер: "
-        f"{get_staff_name(record)}\n"
+        "🦭 Запись создана!\n\n"
+        "Ждём вас в «Капитан Бульк!» 💙\n\n"
+        f"👶 {client_name}\n"
+        f"📅 {date_text} в {time_text}\n"
+        "🏊 Индивидуальная тренировка\n"
         f"⏱ Длительность: "
         f"{format_duration(record)}\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
         f"📍 {address}\n\n"
-        "Запись успешно создана 💙\n"
-        "Будем ждать вас на тренировке!\n\n"
-        "Отменить занятие через бота "
-        "можно, если до него осталось "
-        "22 часа или больше."
+        "Если планы изменятся, пожалуйста, "
+        "отмените или перенесите занятие заранее.\n\n"
+        "До встречи в бассейне! 🦭💦"
     )
 
 

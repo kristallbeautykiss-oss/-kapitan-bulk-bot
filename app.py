@@ -1177,6 +1177,163 @@ def get_client_name(
 
 
 # =========================================================
+# YCLIENTS — ТЕСТ АБОНЕМЕНТОВ / ЛОЯЛЬНОСТИ
+# =========================================================
+
+def test_client_loyalty_cards(
+    client_id,
+):
+    """
+    Временная проверка API лояльности YCLIENTS.
+    Полный ответ пишем только в Render Logs.
+    В Telegram возвращаем только безопасный результат проверки.
+    """
+    url = (
+        f"{YCLIENTS_API}"
+        f"/loyalty/client_cards/"
+        f"{client_id}"
+    )
+
+    try:
+        response = requests.get(
+            url,
+            headers=yclients_user_headers(),
+            timeout=30,
+        )
+
+        print(
+            "LOYALTY CLIENT CARDS TEST:",
+            "client_id=",
+            client_id,
+            "status=",
+            response.status_code,
+            "body=",
+            response.text[:5000],
+        )
+
+        return {
+            "ok":
+                response.status_code == 200,
+
+            "status":
+                response.status_code,
+
+            "data":
+                (
+                    response.json()
+                    if response.text
+                    else {}
+                ),
+        }
+
+    except Exception as e:
+        print(
+            "LOYALTY CLIENT CARDS TEST ERROR:",
+            client_id,
+            e,
+        )
+
+        return {
+            "ok": False,
+            "status": "error",
+            "data": {},
+        }
+
+
+def test_subscription_for_phone(
+    chat_id,
+    phone,
+):
+    send_message(
+        chat_id,
+        "Проверяю абонемент в YCLIENTS… 🎟️",
+    )
+
+    clients, errors = find_client_everywhere(
+        phone
+    )
+
+    if not clients:
+        send_message(
+            chat_id,
+            "Не нашла клиента в YCLIENTS.\n\n"
+            "Проверьте номер в «⚙️ Мои данные».",
+            main_keyboard(),
+        )
+        return
+
+    tested = 0
+    success = 0
+    cards_found = 0
+
+    for item in clients:
+        client_id = (
+            item.get("client", {})
+            .get("id")
+        )
+
+        if not client_id:
+            continue
+
+        tested += 1
+
+        result = test_client_loyalty_cards(
+            client_id
+        )
+
+        if not result.get("ok"):
+            continue
+
+        success += 1
+
+        payload = result.get("data")
+
+        if isinstance(payload, dict):
+            payload = payload.get(
+                "data",
+                payload,
+            )
+
+        if isinstance(payload, list):
+            cards_found += len(payload)
+
+        elif isinstance(payload, dict):
+            for key in (
+                "cards",
+                "items",
+                "client_cards",
+            ):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    cards_found += len(value)
+                    break
+
+    if success:
+        send_message(
+            chat_id,
+            "Тест прошёл 💙\n\n"
+            f"YCLIENTS ответил успешно. "
+            f"Найдено объектов лояльности: "
+            f"{cards_found}.\n\n"
+            "Теперь открой Render → Logs "
+            "и пришли мне скрин строк "
+            "«LOYALTY CLIENT CARDS TEST».",
+            main_keyboard(),
+        )
+    else:
+        send_message(
+            chat_id,
+            "YCLIENTS пока не отдал данные "
+            "по этому методу.\n\n"
+            "Открой Render → Logs и пришли "
+            "мне скрин строки "
+            "«LOYALTY CLIENT CARDS TEST» — "
+            "по коду ответа поймём следующий шаг.",
+            main_keyboard(),
+        )
+
+
+# =========================================================
 # YCLIENTS — ЗАПИСИ
 # =========================================================
 
@@ -3970,13 +4127,17 @@ def telegram_webhook():
             chat_id
         )
 
-        if saved_user:
-            send_message(
+        if (
+            saved_user
+            and saved_user.get(
+                "phone"
+            )
+        ):
+            test_subscription_for_phone(
                 chat_id,
-                "Я уже помню ваш номер 💙\n\n"
-                "Сам абонемент подключим "
-                "следующим этапом.",
-                main_keyboard(),
+                saved_user[
+                    "phone"
+                ],
             )
 
         else:
@@ -4079,13 +4240,13 @@ def telegram_webhook():
             "Выберите нужный филиал "
             "и напишите администратору:\n\n"
             "📍 Нагатинская — "
-            "@Bulk_nagatinskaya\n"
+            "@Bulk_Nagatino\n"
             "📍 Беломорская — "
-            "@Bulk_levoberezhny\n"
-            "📍 Базовская — "
             "@Bulk_hovrino\n"
+            "📍 Базовская — "
+            "@Bulk_zapad\n"
             "📍 Истринская — "
-            "@Bulk_molodezhnaia",
+            "@Bulk_Istra",
             main_keyboard(),
         )
 

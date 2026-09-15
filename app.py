@@ -1177,130 +1177,462 @@ def get_client_name(
 
 
 # =========================================================
-# YCLIENTS — ТЕСТ АБОНЕМЕНТОВ ПО НОМЕРУ ТЕЛЕФОНА
+# YCLIENTS — АБОНЕМЕНТЫ
 # =========================================================
 
-def test_client_abonements_by_phone(
+def get_client_abonements(
     company_id,
     phone,
 ):
-    """
-    Временный безопасный GET-тест.
-    Ничего в YCLIENTS не изменяет.
-    """
-    normalized = normalize_phone(phone)
+    url = (
+        f"{YCLIENTS_API}"
+        f"/loyalty/abonements"
+    )
 
-    # Проверяем два распространённых формата номера.
-    phone_variants = [
-        normalized,
-        f"+{normalized}" if normalized else "",
-    ]
+    params = {
+        "phone": normalize_phone(phone),
+        "company_id": company_id,
+    }
 
-    results = []
-
-    for phone_value in phone_variants:
-        if not phone_value:
-            continue
-
-        url = (
-            f"{YCLIENTS_API}"
-            f"/loyalty/abonements"
+    try:
+        response = requests.get(
+            url,
+            headers=yclients_user_headers(),
+            params=params,
+            timeout=30,
         )
 
-        params = {
-            "phone": phone_value,
-            "company_id": company_id,
+        print(
+            "GET ABONEMENTS:",
+            company_id,
+            response.status_code,
+        )
+
+        if response.status_code != 200:
+            return {
+                "ok": False,
+                "status": response.status_code,
+                "abonements": [],
+            }
+
+        payload = response.json()
+        abonements = payload.get(
+            "data",
+            [],
+        )
+
+        if not isinstance(
+            abonements,
+            list,
+        ):
+            abonements = []
+
+        return {
+            "ok": True,
+            "status": 200,
+            "abonements": abonements,
         }
 
+    except Exception as e:
+        print(
+            "GET ABONEMENTS ERROR:",
+            company_id,
+            e,
+        )
+
+        return {
+            "ok": False,
+            "status": "error",
+            "abonements": [],
+        }
+
+
+def abonement_balance(
+    abonement,
+):
+    counter = abonement.get(
+        "balance_counter"
+    )
+
+    if not isinstance(counter, dict):
+        transaction = abonement.get(
+            "goods_transaction"
+        ) or {}
+
+        if isinstance(transaction, dict):
+            counter = transaction.get(
+                "balance_counter"
+            )
+
+    if isinstance(counter, dict):
+        links = counter.get(
+            "links"
+        ) or []
+
+        if isinstance(links, list):
+            total = 0
+            found = False
+
+            for link in links:
+                if not isinstance(
+                    link,
+                    dict,
+                ):
+                    continue
+
+                try:
+                    total += int(
+                        link.get(
+                            "count",
+                            0,
+                        )
+                    )
+                    found = True
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+            if found:
+                return total
+
         try:
-            response = requests.get(
-                url,
-                headers=yclients_user_headers(),
-                params=params,
-                timeout=30,
+            return int(
+                counter.get(
+                    "count"
+                )
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            pass
+
+    balance_string = abonement.get(
+        "balance_string"
+    )
+
+    if balance_string not in (
+        None,
+        "",
+    ):
+        match = re.search(
+            r"-?\d+",
+            str(balance_string),
+        )
+
+        if match:
+            return int(
+                match.group()
             )
 
-            # В URL номер не печатаем, чтобы не светить его в логах.
-            print(
-                "ABONEMENT PHONE TEST:",
-                "company_id=",
-                company_id,
-                "phone_format=",
-                "plus" if phone_value.startswith("+") else "digits",
-                "status=",
-                response.status_code,
-                "body=",
-                response.text[:7000],
+    return None
+
+
+def abonement_title(
+    abonement,
+):
+    abonement_type = abonement.get(
+        "type"
+    ) or {}
+
+    if isinstance(
+        abonement_type,
+        dict,
+    ):
+        title = (
+            abonement_type.get(
+                "online_sale_title"
             )
-
-            results.append(
-                response.status_code
+            or abonement_type.get(
+                "title"
             )
+        )
 
-            # Если получили успешный ответ, второй формат уже не нужен.
-            if response.status_code == 200:
-                break
+        if title:
+            return str(title)
 
-        except Exception as e:
-            print(
-                "ABONEMENT PHONE TEST ERROR:",
-                company_id,
-                e,
+    return (
+        abonement.get("title")
+        or "Абонемент"
+    )
+
+
+def abonement_expiration_date(
+    abonement,
+):
+    value = abonement.get(
+        "expiration_date"
+    )
+
+    if not value:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(
+            str(value).replace(
+                "Z",
+                "+00:00",
             )
+        )
 
-    return results
+        return dt.date()
+
+    except Exception:
+        try:
+            return datetime.strptime(
+                str(value)[:10],
+                "%Y-%m-%d",
+            ).date()
+        except Exception:
+            return None
 
 
-def test_abonements_for_phone(
+def abonement_is_active(
+    abonement,
+):
+    status = abonement.get(
+        "status"
+    ) or {}
+
+    slug = ""
+
+    if isinstance(status, dict):
+        slug = str(
+            status.get(
+                "slug",
+                "",
+            )
+        ).lower()
+
+    if slug and slug != "active":
+        return False
+
+    if abonement.get(
+        "is_frozen"
+    ):
+        return False
+
+    expiration = (
+        abonement_expiration_date(
+            abonement
+        )
+    )
+
+    if (
+        expiration
+        and expiration
+        < datetime.now(
+            MOSCOW_TZ
+        ).date()
+    ):
+        return False
+
+    balance = abonement_balance(
+        abonement
+    )
+
+    if (
+        balance is not None
+        and balance <= 0
+    ):
+        return False
+
+    return True
+
+
+def format_abonement(
+    abonement,
+):
+    title = abonement_title(
+        abonement
+    )
+
+    balance = abonement_balance(
+        abonement
+    )
+
+    expiration = (
+        abonement_expiration_date(
+            abonement
+        )
+    )
+
+    if balance is None:
+        balance_text = (
+            "не удалось определить"
+        )
+    else:
+        balance_text = (
+            f"{balance} "
+            f"{lessons_word(balance)}"
+        )
+
+    if expiration:
+        expiration_text = (
+            expiration.strftime(
+                "%d.%m.%Y"
+            )
+        )
+    else:
+        expiration_text = (
+            "не указан"
+        )
+
+    return (
+        f"🏊 {title}\n\n"
+        f"💙 Осталось: {balance_text}\n"
+        f"📅 Действует до: {expiration_text}"
+    )
+
+
+def lessons_word(
+    number,
+):
+    number = abs(
+        int(number)
+    )
+
+    last_two = (
+        number % 100
+    )
+
+    last = (
+        number % 10
+    )
+
+    if 11 <= last_two <= 14:
+        return "занятий"
+
+    if last == 1:
+        return "занятие"
+
+    if 2 <= last <= 4:
+        return "занятия"
+
+    return "занятий"
+
+
+def show_abonements(
     chat_id,
     phone,
 ):
-    send_message(
-        chat_id,
-        "Проверяю абонемент по вашему номеру… 🎟️",
-    )
-
-    clients, errors = find_client_everywhere(
-        phone
+    clients, client_errors = (
+        find_client_everywhere(
+            phone
+        )
     )
 
     if not clients:
         send_message(
             chat_id,
-            "Не нашла клиента в YCLIENTS.\n\n"
-            "Проверьте номер в «⚙️ Мои данные».",
+            "Не нашла вас в клиентской базе.\n\n"
+            "Если вы меняли номер, откройте "
+            "«⚙️ Мои данные».",
             main_keyboard(),
         )
         return
 
-    tested_companies = set()
+    all_abonements = []
+    seen = set()
+    successful_requests = 0
 
     for item in clients:
         company_id = item.get(
             "company_id"
         )
 
-        if (
-            not company_id
-            or company_id in tested_companies
-        ):
+        if not company_id:
             continue
 
-        tested_companies.add(
-            company_id
-        )
-
-        test_client_abonements_by_phone(
+        result = get_client_abonements(
             company_id,
             phone,
         )
 
+        if not result.get("ok"):
+            continue
+
+        successful_requests += 1
+
+        for abonement in result.get(
+            "abonements",
+            [],
+        ):
+            if not isinstance(
+                abonement,
+                dict,
+            ):
+                continue
+
+            if not abonement_is_active(
+                abonement
+            ):
+                continue
+
+            key = (
+                abonement.get("id")
+                or abonement.get("number")
+                or (
+                    abonement_title(
+                        abonement
+                    ),
+                    abonement.get(
+                        "expiration_date"
+                    ),
+                )
+            )
+
+            key = str(key)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            all_abonements.append(
+                abonement
+            )
+
+    if not all_abonements:
+        if successful_requests:
+            text = (
+                "🎟️ Мой абонемент\n\n"
+                "Сейчас активных абонементов нет 💙"
+            )
+        else:
+            text = (
+                "Не удалось получить данные "
+                "об абонементе из YCLIENTS.\n\n"
+                "Попробуйте немного позже 💙"
+            )
+
+        send_message(
+            chat_id,
+            text,
+            main_keyboard(),
+        )
+        return
+
+    blocks = [
+        format_abonement(
+            abonement
+        )
+        for abonement
+        in all_abonements
+    ]
+
+    text = (
+        "🎟️ Мой абонемент\n\n"
+        + "\n\n──────────\n\n".join(
+            blocks
+        )
+        + "\n\n🦭 Ждём вас на тренировках!"
+    )
+
     send_message(
         chat_id,
-        "Проверка закончена 💙\n\n"
-        "Открой Render → Logs и найди "
-        "«ABONEMENT PHONE TEST». "
-        "Пришли мне скрин этих строк.",
+        text,
         main_keyboard(),
     )
 
@@ -4105,7 +4437,7 @@ def telegram_webhook():
                 "phone"
             )
         ):
-            test_abonements_for_phone(
+            show_abonements(
                 chat_id,
                 saved_user[
                     "phone"

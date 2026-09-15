@@ -1177,38 +1177,41 @@ def get_client_name(
 
 
 # =========================================================
-# YCLIENTS — ТЕСТ НАСТОЯЩИХ АБОНЕМЕНТОВ
+# YCLIENTS — ТЕСТ АБОНЕМЕНТОВ ПО НОМЕРУ ТЕЛЕФОНА
 # =========================================================
 
-def test_client_abonements(
+def test_client_abonements_by_phone(
     company_id,
-    client_id,
+    phone,
 ):
     """
-    Временная диагностика API абонементов.
-    Пробуем только GET-запросы: ничего в YCLIENTS не меняем.
-    Ответы видны в Render Logs.
+    Временный безопасный GET-тест.
+    Ничего в YCLIENTS не изменяет.
     """
-    candidates = [
-        (
-            f"{YCLIENTS_API}/loyalty/abonements",
-            {
-                "client_id": client_id,
-                "company_id": company_id,
-            },
-        ),
-        (
-            f"{YCLIENTS_API}/user/loyalty/abonements",
-            {
-                "client_id": client_id,
-                "company_id": company_id,
-            },
-        ),
+    normalized = normalize_phone(phone)
+
+    # Проверяем два распространённых формата номера.
+    phone_variants = [
+        normalized,
+        f"+{normalized}" if normalized else "",
     ]
 
     results = []
 
-    for url, params in candidates:
+    for phone_value in phone_variants:
+        if not phone_value:
+            continue
+
+        url = (
+            f"{YCLIENTS_API}"
+            f"/loyalty/abonements"
+        )
+
+        params = {
+            "phone": phone_value,
+            "company_id": company_id,
+        }
+
         try:
             response = requests.get(
                 url,
@@ -1217,32 +1220,33 @@ def test_client_abonements(
                 timeout=30,
             )
 
+            # В URL номер не печатаем, чтобы не светить его в логах.
             print(
-                "ABONEMENT API TEST:",
-                "url=",
-                response.url,
+                "ABONEMENT PHONE TEST:",
+                "company_id=",
+                company_id,
+                "phone_format=",
+                "plus" if phone_value.startswith("+") else "digits",
                 "status=",
                 response.status_code,
                 "body=",
                 response.text[:7000],
             )
 
-            results.append({
-                "url": response.url,
-                "status": response.status_code,
-            })
+            results.append(
+                response.status_code
+            )
+
+            # Если получили успешный ответ, второй формат уже не нужен.
+            if response.status_code == 200:
+                break
 
         except Exception as e:
             print(
-                "ABONEMENT API TEST ERROR:",
-                url,
+                "ABONEMENT PHONE TEST ERROR:",
+                company_id,
                 e,
             )
-
-            results.append({
-                "url": url,
-                "status": "error",
-            })
 
     return results
 
@@ -1253,7 +1257,7 @@ def test_abonements_for_phone(
 ):
     send_message(
         chat_id,
-        "Проверяю именно абонементы в YCLIENTS… 🎟️",
+        "Проверяю абонемент по вашему номеру… 🎟️",
     )
 
     clients, errors = find_client_everywhere(
@@ -1269,35 +1273,34 @@ def test_abonements_for_phone(
         )
         return
 
-    tested = 0
+    tested_companies = set()
 
     for item in clients:
         company_id = item.get(
             "company_id"
         )
 
-        client_id = (
-            item.get("client", {})
-            .get("id")
-        )
-
-        if not company_id or not client_id:
+        if (
+            not company_id
+            or company_id in tested_companies
+        ):
             continue
 
-        tested += 1
+        tested_companies.add(
+            company_id
+        )
 
-        test_client_abonements(
+        test_client_abonements_by_phone(
             company_id,
-            client_id,
+            phone,
         )
 
     send_message(
         chat_id,
         "Проверка закончена 💙\n\n"
-        "Теперь открой Render → Logs и найди "
-        "строки «ABONEMENT API TEST». "
-        "Пришли мне скрин — по ответу сразу "
-        "увидим правильный метод.",
+        "Открой Render → Logs и найди "
+        "«ABONEMENT PHONE TEST». "
+        "Пришли мне скрин этих строк.",
         main_keyboard(),
     )
 

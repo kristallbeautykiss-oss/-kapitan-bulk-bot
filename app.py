@@ -1283,6 +1283,23 @@ def confirm_yclients_record(
     company_id,
     record_id,
 ):
+    # YCLIENTS не принимает обновление записи только с confirmed.
+    # Сначала получаем существующую запись и возвращаем
+    # обязательные поля вместе с confirmed=1.
+    record = get_record(
+        company_id,
+        record_id,
+    )
+
+    if not record:
+        print(
+            "CONFIRM RECORD ERROR:",
+            "record not found",
+            company_id,
+            record_id,
+        )
+        return False
+
     url = (
         f"{YCLIENTS_API}"
         f"/record/"
@@ -1290,17 +1307,53 @@ def confirm_yclients_record(
         f"{record_id}"
     )
 
+    client = record.get("client") or {}
+    services = record.get("services") or []
+
+    payload = {
+        "staff_id":
+            record.get("staff_id")
+            or (
+                record.get("staff", {})
+                .get("id")
+                if isinstance(
+                    record.get("staff"),
+                    dict,
+                )
+                else None
+            ),
+
+        "services":
+            services,
+
+        "client":
+            client,
+
+        "seance_length":
+            record.get("seance_length")
+            or record.get("length"),
+
+        "datetime":
+            record.get("datetime")
+            or record.get("date"),
+
+        "confirmed":
+            1,
+    }
+
+    # Не отправляем случайные None, чтобы лог был понятнее.
+    payload = {
+        key: value
+        for key, value in payload.items()
+        if value is not None
+    }
+
     try:
         response = requests.put(
             url,
             headers=
                 yclients_user_headers(),
-
-            json={
-                "confirmed":
-                    1
-            },
-
+            json=payload,
             timeout=30,
         )
 
@@ -1309,7 +1362,7 @@ def confirm_yclients_record(
             company_id,
             record_id,
             response.status_code,
-            response.text[:800],
+            response.text[:1200],
         )
 
         return (
@@ -1327,7 +1380,6 @@ def confirm_yclients_record(
         )
 
         return False
-
 
 def delete_yclients_record(
     company_id,
@@ -1939,18 +1991,12 @@ def scan_and_send_reminders():
             ):
                 continue
 
-            # Кнопку подтверждения показываем, пока клиент
-            # не подтвердил запись именно через нашего бота.
-            # Поле confirmed в YCLIENTS не используем для скрытия
-            # кнопки: запись там может быть подтверждена заранее.
             already_confirmed = (
                 bool(
-                    existing.get(
+                    record.get(
                         "confirmed"
                     )
                 )
-                if existing
-                else False
             )
 
             response = send_message(
@@ -2027,7 +2073,7 @@ def scan_and_send_reminders():
 
 
 # =========================================================
-# ПРАВИЛО 23 ЧАСА
+# ПРАВИЛО 22 ЧАСА
 # =========================================================
 
 def can_cancel_record(
@@ -2043,7 +2089,7 @@ def can_cancel_record(
         return False
 
     return (
-        hours_left >= 23
+        hours_left >= 22
     )
 
 
@@ -2444,7 +2490,7 @@ def handle_callback_query(
                 "уже недоступна.\n\n"
                 "Отменить занятие через бота "
                 "можно не позднее чем "
-                "за 23 часа до начала.\n\n"
+                "за 22 часа до начала.\n\n"
                 "Сейчас, пожалуйста, "
                 "напишите администратору "
                 "вашего филиала:\n"
@@ -2539,7 +2585,7 @@ def handle_callback_query(
                 chat_id,
                 "За время подтверждения "
                 "до занятия осталось "
-                "меньше 23 часов.\n\n"
+                "меньше 22 часов.\n\n"
                 "Самостоятельная отмена "
                 "уже недоступна.\n\n"
                 "Напишите администратору:\n"

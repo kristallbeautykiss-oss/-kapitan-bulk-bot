@@ -2481,13 +2481,62 @@ def yclients_webhook():
             or {}
         )
 
-    user = (
-        get_saved_user_by_phone(
+    # Временная безопасная диагностика:
+    # показываем только последние 4 цифры номера.
+    def masked_debug_phone(value):
+        normalized = normalize_phone(
+            value
+        )
+
+        if not normalized:
+            return "EMPTY"
+
+        return (
+            "*" * max(
+                0,
+                len(normalized) - 4,
+            )
+            + normalized[-4:]
+        )
+
+    saved_users = get_all_saved_users()
+
+    print(
+        "NEW RECORD PHONE:",
+        masked_debug_phone(
+            phone
+        ),
+    )
+
+    print(
+        "SAVED TELEGRAM PHONES:",
+        [
+            masked_debug_phone(
+                item.get(
+                    "phone",
+                    "",
+                )
+            )
+            for item in saved_users
+        ],
+    )
+
+    user = None
+
+    if phone:
+        wanted_phone = normalize_phone(
             phone
         )
-        if phone
-        else None
-    )
+
+        for item in saved_users:
+            if normalize_phone(
+                item.get(
+                    "phone",
+                    "",
+                )
+            ) == wanted_phone:
+                user = item
+                break
 
     if not user:
         print(

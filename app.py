@@ -1864,6 +1864,117 @@ def format_new_record_notification(
     )
 
 
+def format_transfer_notification(
+    record,
+    branch_name,
+):
+    dt = record_datetime(
+        record
+    )
+
+    if dt:
+        date_text = dt.strftime(
+            "%d.%m.%Y"
+        )
+        time_text = dt.strftime(
+            "%H:%M"
+        )
+    else:
+        date_text = "дата не указана"
+        time_text = "время не указано"
+
+    address = (
+        BRANCHES
+        .get(
+            branch_name,
+            {},
+        )
+        .get(
+            "address",
+            branch_name,
+        )
+    )
+
+    client_name = ""
+
+    clients = record.get(
+        "clients"
+    ) or []
+
+    if isinstance(
+        clients,
+        list,
+    ):
+        for item in clients:
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            client_data = (
+                item.get(
+                    "client"
+                )
+                or item
+            )
+
+            if isinstance(
+                client_data,
+                dict,
+            ):
+                client_name = (
+                    client_data.get(
+                        "name"
+                    )
+                    or client_data.get(
+                        "display_name"
+                    )
+                    or ""
+                )
+
+                if client_name:
+                    break
+
+    if not client_name:
+        client_data = record.get(
+            "client"
+        )
+
+        if isinstance(
+            client_data,
+            dict,
+        ):
+            client_name = (
+                client_data.get(
+                    "name"
+                )
+                or client_data.get(
+                    "display_name"
+                )
+                or ""
+            )
+
+    if not client_name:
+        client_name = "Клиент"
+
+    return (
+        "🔄 Запись перенесена!\n\n"
+        "Ваша запись в «Капитан Бульк!» перенесена 💙\n\n"
+        f"👶 {client_name}\n"
+        f"📅 Новая дата: {date_text} в {time_text}\n"
+        "🏊 Индивидуальная тренировка\n"
+        f"⏱ Длительность: "
+        f"{format_duration(record)}\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
+        f"📍 {address}\n\n"
+        "Пожалуйста, обратите внимание на новую "
+        "дату и время занятия.\n\n"
+        "До встречи в бассейне! 🦭💦"
+    )
+
+
 def format_admin_cancel_notification(
     record,
     branch_name,
@@ -2522,6 +2633,7 @@ def yclients_webhook():
 
     if status not in (
         "create",
+        "update",
         "delete",
     ):
         return (
@@ -2586,6 +2698,258 @@ def yclients_webhook():
             "ok",
             200,
         )
+
+    # -----------------------------------------------------
+    # ПЕРЕНОС ЗАПИСИ В YCLIENTS
+    # -----------------------------------------------------
+    if status == "update":
+        record = webhook_data
+
+        # Сравниваем новую дату/время с тем, что бот уже знает
+        # об этой записи. Уведомляем только при реальном переносе,
+        # а не при смене комментария или статуса.
+        new_dt = record_datetime(
+            record
+        )
+
+        existing = get_reminder_row(
+            company_id,
+            record_id,
+        )
+
+        old_dt = None
+
+        if (
+            existing
+            and existing.get(
+                "record_datetime"
+            )
+        ):
+            try:
+                old_value = str(
+                    existing.get(
+                        "record_datetime"
+                    )
+                ).replace(
+                    "Z",
+                    "+00:00",
+                )
+
+                old_dt = datetime.fromisoformat(
+                    old_value
+                )
+
+                if old_dt.tzinfo is None:
+                    old_dt = old_dt.replace(
+                        tzinfo=MOSCOW_TZ
+                    )
+
+                old_dt = old_dt.astimezone(
+                    MOSCOW_TZ
+                )
+
+            except Exception as e:
+                print(
+                    "TRANSFER OLD DATETIME ERROR:",
+                    e,
+                )
+
+        # Если записи ещё нет в нашей таблице, сохраняем её
+        # как исходное состояние и ничего клиенту не отправляем.
+        if not existing:
+            phone = ""
+
+            clients = record.get(
+                "clients"
+            ) or []
+
+            if isinstance(
+                clients,
+                list,
+            ):
+                for item in clients:
+                    if not isinstance(
+                        item,
+                        dict,
+                    ):
+                        continue
+
+                    client_data = (
+                        item.get(
+                            "client"
+                        )
+                        or item
+                    )
+
+                    if isinstance(
+                        client_data,
+                        dict,
+                    ):
+                        phone = client_data.get(
+                            "phone",
+                            "",
+                        )
+
+                        if phone:
+                            break
+
+            user = (
+                get_saved_user_by_phone(
+                    phone
+                )
+                if phone
+                else None
+            )
+
+            if user and new_dt:
+                create_reminder_row(
+                    company_id,
+                    record_id,
+                    user.get(
+                        "chat_id"
+                    ),
+                    new_dt.isoformat(),
+                    reminder_sent=False,
+                    confirmed=False,
+                )
+
+            print(
+                "UPDATE WEBHOOK: baseline saved, "
+                "no transfer notification",
+                company_id,
+                record_id,
+            )
+
+            return (
+                "ok",
+                200,
+            )
+
+        # Нет изменения даты/времени — это не перенос.
+        if (
+            not new_dt
+            or not old_dt
+            or abs(
+                (
+                    new_dt - old_dt
+                ).total_seconds()
+            ) < 60
+        ):
+            return (
+                "ok",
+                200,
+            )
+
+        phone = ""
+
+        clients = record.get(
+            "clients"
+        ) or []
+
+        if isinstance(
+            clients,
+            list,
+        ):
+            for item in clients:
+                if not isinstance(
+                    item,
+                    dict,
+                ):
+                    continue
+
+                client_data = (
+                    item.get(
+                        "client"
+                    )
+                    or item
+                )
+
+                if isinstance(
+                    client_data,
+                    dict,
+                ):
+                    phone = client_data.get(
+                        "phone",
+                        "",
+                    )
+
+                    if phone:
+                        break
+
+        user = (
+            get_saved_user_by_phone(
+                phone
+            )
+            if phone
+            else None
+        )
+
+        if not user:
+            print(
+                "TRANSFER WEBHOOK: "
+                "Telegram user not found"
+            )
+            return (
+                "ok",
+                200,
+            )
+
+        chat_id = user.get(
+            "chat_id"
+        )
+
+        response = send_message(
+            chat_id,
+            format_transfer_notification(
+                record,
+                branch_name,
+            ),
+            new_record_buttons(
+                company_id,
+                record_id,
+            ),
+        )
+
+        if (
+            response
+            and response.status_code == 200
+        ):
+            update_reminder_row(
+                company_id,
+                record_id,
+                {
+                    "chat_id":
+                        int(chat_id),
+
+                    "record_datetime":
+                        new_dt.isoformat(),
+
+                    # После переноса напоминание за сутки
+                    # должно иметь возможность уйти заново.
+                    "reminder_sent":
+                        False,
+
+                    "confirmed":
+                        False,
+                },
+            )
+
+        print(
+            "TRANSFER NOTIFICATION:",
+            company_id,
+            record_id,
+            (
+                response.status_code
+                if response
+                else "no response"
+            ),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
 
     # -----------------------------------------------------
     # ОТМЕНА АДМИНИСТРАТОРОМ В YCLIENTS
@@ -2885,6 +3249,42 @@ def yclients_webhook():
             record_id,
         ),
     )
+
+    if (
+        response
+        and response.status_code == 200
+    ):
+        dt = record_datetime(
+            record
+        )
+
+        existing = get_reminder_row(
+            company_id,
+            record_id,
+        )
+
+        if dt:
+            if existing:
+                update_reminder_row(
+                    company_id,
+                    record_id,
+                    {
+                        "chat_id":
+                            int(chat_id),
+
+                        "record_datetime":
+                            dt.isoformat(),
+                    },
+                )
+            else:
+                create_reminder_row(
+                    company_id,
+                    record_id,
+                    chat_id,
+                    dt.isoformat(),
+                    reminder_sent=False,
+                    confirmed=False,
+                )
 
     print(
         "NEW RECORD NOTIFICATION:",

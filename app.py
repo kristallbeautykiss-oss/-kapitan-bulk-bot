@@ -67,7 +67,7 @@ BRANCHES = {
         "address":
             "Нагатинская, 16",
         "admin":
-            "@Bulk_nagatinskaya",
+            "@Bulk_Nagatino",
     },
 
     "Беломорская": {
@@ -77,7 +77,7 @@ BRANCHES = {
         "address":
             "Беломорская, 9",
         "admin":
-            "@Bulk_levoberezhny",
+            "@Bulk_hovrino",
     },
 
     "Базовская": {
@@ -87,7 +87,7 @@ BRANCHES = {
         "address":
             "Базовская, 15А",
         "admin":
-            "@Bulk_hovrino",
+            "@Bulk_zapad",
     },
 
     "Истринская": {
@@ -97,7 +97,7 @@ BRANCHES = {
         "address":
             "Истринская, 5",
         "admin":
-            "@Bulk_molodezhnaia",
+            "@Bulk_Istra",
     },
 }
 
@@ -372,6 +372,24 @@ def reminder_buttons(
     }
 
 
+def new_record_buttons(
+    company_id,
+    record_id,
+):
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text":
+                        "❌ Отменить занятие",
+                    "callback_data":
+                        f"cancel:{company_id}:{record_id}",
+                }
+            ]
+        ]
+    }
+
+
 def confirm_cancel_buttons(
     company_id,
     record_id,
@@ -584,6 +602,28 @@ def get_all_saved_users():
         )
 
         return []
+
+
+def get_saved_user_by_phone(
+    phone,
+):
+    wanted = normalize_phone(
+        phone
+    )
+
+    if not wanted:
+        return None
+
+    for user in get_all_saved_users():
+        if normalize_phone(
+            user.get(
+                "phone",
+                "",
+            )
+        ) == wanted:
+            return user
+
+    return None
 
 
 def save_user(
@@ -1675,6 +1715,81 @@ def format_record(
     )
 
 
+def format_new_record_notification(
+    record,
+    branch_name,
+):
+    dt = record_datetime(
+        record
+    )
+
+    if dt:
+        when = dt.strftime(
+            "%d.%m.%Y в %H:%M"
+        )
+    else:
+        when = "время не указано"
+
+    branch = BRANCHES.get(
+        branch_name,
+        {},
+    )
+
+    address = branch.get(
+        "address",
+        branch_name,
+    )
+
+    services = record.get(
+        "services"
+    ) or []
+
+    service_titles = []
+
+    if isinstance(
+        services,
+        list,
+    ):
+        for service in services:
+            if isinstance(
+                service,
+                dict,
+            ):
+                title = service.get(
+                    "title"
+                )
+
+                if title:
+                    service_titles.append(
+                        str(title)
+                    )
+
+    service_name = (
+        ", ".join(
+            service_titles
+        )
+        if service_titles
+        else "Индивидуальная тренировка"
+    )
+
+    return (
+        "🦭 Вы записаны к "
+        "Капитану Бульку!\n\n"
+        f"🗓 {when}\n"
+        f"🏊 {service_name}\n"
+        f"👤 Тренер: "
+        f"{get_staff_name(record)}\n"
+        f"⏱ Длительность: "
+        f"{format_duration(record)}\n"
+        f"📍 {address}\n\n"
+        "Запись успешно создана 💙\n"
+        "Будем ждать вас на тренировке!\n\n"
+        "Отменить занятие через бота "
+        "можно, если до него осталось "
+        "22 часа или больше."
+    )
+
+
 def format_reminder(
     record,
     branch_name,
@@ -2205,6 +2320,210 @@ def yclients_webhook():
     print(
         "YCLIENTS WEBHOOK:",
         data,
+    )
+
+    # Нас интересует только создание новой записи.
+    if not (
+        data.get(
+            "resource"
+        )
+        == "record"
+        and data.get(
+            "status"
+        )
+        == "create"
+    ):
+        return (
+            "ok",
+            200,
+        )
+
+    try:
+        company_id = int(
+            data.get(
+                "company_id"
+            )
+        )
+
+        record_id = int(
+            data.get(
+                "resource_id"
+            )
+            or (
+                data.get(
+                    "data"
+                )
+                or {}
+            ).get(
+                "id"
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        print(
+            "NEW RECORD WEBHOOK: "
+            "missing company_id/record_id"
+        )
+        return (
+            "ok",
+            200,
+        )
+
+    branch_name = (
+        branch_name_by_company_id(
+            company_id
+        )
+    )
+
+    if not branch_name:
+        print(
+            "NEW RECORD WEBHOOK: "
+            "unknown branch",
+            company_id,
+        )
+        return (
+            "ok",
+            200,
+        )
+
+    # Получаем полную запись: в webhook YCLIENTS
+    # часть полей может отсутствовать.
+    record = get_record(
+        company_id,
+        record_id,
+    )
+
+    if not record:
+        record = (
+            data.get(
+                "data"
+            )
+            or {}
+        )
+
+    # Ищем телефон клиента в полной записи.
+    phone = ""
+
+    client = record.get(
+        "client"
+    )
+
+    if isinstance(
+        client,
+        dict,
+    ):
+        phone = client.get(
+            "phone",
+            "",
+        )
+
+    elif isinstance(
+        client,
+        list,
+    ):
+        for item in client:
+            if isinstance(
+                item,
+                dict,
+            ) and item.get(
+                "phone"
+            ):
+                phone = item.get(
+                    "phone"
+                )
+                break
+
+    # Если API записи не вернул телефон,
+    # пробуем взять его прямо из webhook.
+    if not phone:
+        webhook_client = (
+            (
+                data.get(
+                    "data"
+                )
+                or {}
+            ).get(
+                "client"
+            )
+        )
+
+        if isinstance(
+            webhook_client,
+            dict,
+        ):
+            phone = webhook_client.get(
+                "phone",
+                "",
+            )
+
+        elif isinstance(
+            webhook_client,
+            list,
+        ):
+            for item in webhook_client:
+                if isinstance(
+                    item,
+                    dict,
+                ) and item.get(
+                    "phone"
+                ):
+                    phone = item.get(
+                        "phone"
+                    )
+                    break
+
+    user = (
+        get_saved_user_by_phone(
+            phone
+        )
+        if phone
+        else None
+    )
+
+    if not user:
+        print(
+            "NEW RECORD WEBHOOK: "
+            "Telegram user not found"
+        )
+        return (
+            "ok",
+            200,
+        )
+
+    chat_id = user.get(
+        "chat_id"
+    )
+
+    if not chat_id:
+        return (
+            "ok",
+            200,
+        )
+
+    response = send_message(
+        chat_id,
+        format_new_record_notification(
+            record,
+            branch_name,
+        ),
+        new_record_buttons(
+            company_id,
+            record_id,
+        ),
+    )
+
+    print(
+        "NEW RECORD NOTIFICATION:",
+        company_id,
+        record_id,
+        (
+            response.status_code
+            if response
+            else "no response"
+        ),
     )
 
     return (

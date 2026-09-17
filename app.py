@@ -4100,9 +4100,27 @@ def handle_callback_query(
                 message_id,
             )
 
+            dt = record_datetime(
+                record
+            )
+
+            if dt:
+                cancelled_when = (
+                    dt.strftime(
+                        "%d.%m.%Y в %H:%M"
+                    )
+                )
+            else:
+                cancelled_when = (
+                    "на выбранное время"
+                )
+
             send_message(
                 chat_id,
                 "✅ Занятие отменено.\n\n"
+                f"Ваше занятие "
+                f"{cancelled_when} "
+                "отменено.\n\n"
                 "Будем ждать вас "
                 "в другой раз 💙🦭",
                 main_keyboard(),

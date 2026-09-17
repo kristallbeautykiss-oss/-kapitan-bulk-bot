@@ -31,6 +31,14 @@ REMINDER_SECRET = os.environ.get(
 ).strip()
 
 
+# Telegram-чат, куда будут приходить жалобы и предложения.
+# Добавим его ID в Render после создания служебного чата.
+FEEDBACK_CHAT_ID = os.environ.get(
+    "FEEDBACK_CHAT_ID",
+    "",
+).strip()
+
+
 TELEGRAM_API = (
     f"https://api.telegram.org/bot{BOT_TOKEN}"
 )
@@ -107,6 +115,7 @@ BRANCHES = {
 # =========================================================
 
 PENDING_ACTIONS = {}
+FEEDBACK_DATA = {}
 
 # Записи, которые прямо сейчас отменяются самим клиентом через Telegram.
 # Нужны, чтобы webhook YCLIENTS не прислал второе уведомление об отмене.
@@ -240,11 +249,65 @@ def main_keyboard():
             [
                 {
                     "text":
-                        "⚙️ Мои данные"
+                        "💬 Жалобы и предложения"
                 },
                 {
                     "text":
+                        "⚙️ Мои данные"
+                },
+            ],
+            [
+                {
+                    "text":
                         "💬 Связаться с нами"
+                },
+            ],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def feedback_type_keyboard():
+    return {
+        "keyboard": [
+            [
+                {
+                    "text":
+                        "💡 Предложение"
+                },
+                {
+                    "text":
+                        "⚠️ Жалоба"
+                },
+            ],
+            [
+                {
+                    "text":
+                        "💙 Благодарность"
+                },
+                {
+                    "text":
+                        "💬 Другое"
+                },
+            ],
+            [
+                {
+                    "text":
+                        "← Назад"
+                },
+            ],
+        ],
+        "resize_keyboard": True,
+    }
+
+
+def feedback_message_keyboard():
+    return {
+        "keyboard": [
+            [
+                {
+                    "text":
+                        "← Назад"
                 },
             ],
         ],
@@ -4213,6 +4276,19 @@ def telegram_webhook():
         "contact"
     )
 
+    # Служебная команда для настройки чата обращений.
+    # Добавьте бота в нужную Telegram-группу и отправьте там /chatid.
+    if text == "/chatid":
+        send_message(
+            chat_id,
+            f"ID этого чата: {chat_id}",
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
     sender_id = (
         message
         .get(
@@ -4695,6 +4771,218 @@ def telegram_webhook():
     # СВЯЗАТЬСЯ
     # =====================================================
 
+    # =====================================================
+    # ЖАЛОБЫ И ПРЕДЛОЖЕНИЯ
+    # =====================================================
+
+    if text == "💬 Жалобы и предложения":
+        FEEDBACK_DATA.pop(
+            chat_id,
+            None,
+        )
+
+        PENDING_ACTIONS[
+            chat_id
+        ] = "feedback_type"
+
+        send_message(
+            chat_id,
+            "💬 Жалобы и предложения\n\n"
+            "Нам важно ваше мнение 💙\n"
+            "Что вы хотите нам отправить?",
+            feedback_type_keyboard(),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+
+    feedback_types = {
+        "💡 Предложение":
+            "Предложение",
+
+        "⚠️ Жалоба":
+            "Жалоба",
+
+        "💙 Благодарность":
+            "Благодарность",
+
+        "💬 Другое":
+            "Другое",
+    }
+
+    if (
+        PENDING_ACTIONS.get(
+            chat_id
+        ) == "feedback_type"
+        and text in feedback_types
+    ):
+        FEEDBACK_DATA[
+            chat_id
+        ] = {
+            "type":
+                feedback_types[
+                    text
+                ]
+        }
+
+        PENDING_ACTIONS[
+            chat_id
+        ] = "feedback_branch"
+
+        send_message(
+            chat_id,
+            "Выберите филиал, "
+            "к которому относится сообщение:",
+            branch_keyboard(),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+
+    if (
+        PENDING_ACTIONS.get(
+            chat_id
+        ) == "feedback_branch"
+        and text in BRANCHES
+    ):
+        FEEDBACK_DATA.setdefault(
+            chat_id,
+            {},
+        )[
+            "branch"
+        ] = text
+
+        PENDING_ACTIONS[
+            chat_id
+        ] = "feedback_message"
+
+        send_message(
+            chat_id,
+            "Напишите ваше сообщение "
+            "одним сообщением 👇",
+            feedback_message_keyboard(),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+
+    if (
+        PENDING_ACTIONS.get(
+            chat_id
+        ) == "feedback_message"
+        and text
+        and text != "← Назад"
+    ):
+        feedback = (
+            FEEDBACK_DATA.get(
+                chat_id,
+                {},
+            )
+        )
+
+        feedback_type = (
+            feedback.get(
+                "type",
+                "Другое",
+            )
+        )
+
+        branch_name = (
+            feedback.get(
+                "branch",
+                "Не указан",
+            )
+        )
+
+        saved_user = get_saved_user(
+            chat_id
+        ) or {}
+
+        phone = normalize_phone(
+            saved_user.get(
+                "phone",
+                "",
+            )
+        )
+
+        if phone:
+            phone_text = (
+                "+"
+                + phone
+            )
+        else:
+            phone_text = (
+                "не указан"
+            )
+
+        admin_text = (
+            "💬 Новое обращение\n\n"
+            f"Тип: {feedback_type}\n"
+            f"📍 Филиал: {branch_name}\n"
+            f"📱 Телефон: {phone_text}\n\n"
+            "Сообщение:\n"
+            f"{text}"
+        )
+
+        delivered = False
+
+        if FEEDBACK_CHAT_ID:
+            response = send_message(
+                FEEDBACK_CHAT_ID,
+                admin_text,
+            )
+
+            delivered = bool(
+                response
+                and response.status_code
+                == 200
+            )
+
+        if delivered:
+            send_message(
+                chat_id,
+                "💙 Спасибо! "
+                "Мы получили ваше сообщение.\n\n"
+                "Обязательно его рассмотрим.",
+                main_keyboard(),
+            )
+
+            PENDING_ACTIONS.pop(
+                chat_id,
+                None,
+            )
+
+            FEEDBACK_DATA.pop(
+                chat_id,
+                None,
+            )
+
+        else:
+            send_message(
+                chat_id,
+                "Не получилось отправить "
+                "сообщение 😔\n\n"
+                "Пожалуйста, попробуйте "
+                "ещё раз немного позже "
+                "или свяжитесь с нами напрямую.",
+                main_keyboard(),
+            )
+
+        return (
+            "ok",
+            200,
+        )
+
+
     if text == "💬 Связаться с нами":
         send_message(
             chat_id,
@@ -4723,6 +5011,11 @@ def telegram_webhook():
 
     if text == "← Назад":
         PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
+
+        FEEDBACK_DATA.pop(
             chat_id,
             None,
         )

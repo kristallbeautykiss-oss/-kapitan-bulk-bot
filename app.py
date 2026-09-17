@@ -4542,6 +4542,30 @@ def telegram_webhook():
             )
         )
 
+        if pending_action == "feedback_branch":
+            FEEDBACK_DATA.setdefault(
+                chat_id,
+                {},
+            )[
+                "branch"
+            ] = text
+
+            PENDING_ACTIONS[
+                chat_id
+            ] = "feedback_message"
+
+            send_message(
+                chat_id,
+                "Напишите ваше сообщение "
+                "одним сообщением 👇",
+                feedback_message_keyboard(),
+            )
+
+            return (
+                "ok",
+                200,
+            )
+
         if pending_action == "buy_subscription":
             PENDING_ACTIONS.pop(
                 chat_id,

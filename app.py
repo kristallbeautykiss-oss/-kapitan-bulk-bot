@@ -2749,16 +2749,37 @@ def show_records(
     )
 
     for item in records[:10]:
+        record = item[
+            "record"
+        ]
+
+        company_id = item[
+            "company_id"
+        ]
+
+        record_id = record.get(
+            "id"
+        )
+
+        reply_markup = None
+
+        if record_id:
+            reply_markup = (
+                new_record_buttons(
+                    company_id,
+                    record_id,
+                )
+            )
+
         send_message(
             chat_id,
             format_record(
-                item[
-                    "record"
-                ],
+                record,
                 item[
                     "branch"
                 ],
             ),
+            reply_markup,
         )
 
     send_message(

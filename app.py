@@ -315,6 +315,40 @@ def feedback_message_keyboard():
     }
 
 
+def feedback_branch_keyboard():
+    return {
+        "keyboard": [
+            [
+                {
+                    "text":
+                        "📍 Нагатинская"
+                },
+                {
+                    "text":
+                        "📍 Беломорская"
+                },
+            ],
+            [
+                {
+                    "text":
+                        "📍 Базовская"
+                },
+                {
+                    "text":
+                        "📍 Истринская"
+                },
+            ],
+            [
+                {
+                    "text":
+                        "← Назад"
+                },
+            ],
+        ],
+        "resize_keyboard": True,
+    }
+
+
 def branch_keyboard():
     return {
         "keyboard": [
@@ -4542,35 +4576,11 @@ def telegram_webhook():
             )
         )
 
-        if pending_action == "feedback_branch":
-            FEEDBACK_DATA.setdefault(
-                chat_id,
-                {},
-            )[
-                "branch"
-            ] = text
-
-            PENDING_ACTIONS[
-                chat_id
-            ] = "feedback_message"
-
-            send_message(
-                chat_id,
-                "Напишите ваше сообщение "
-                "одним сообщением 👇",
-                feedback_message_keyboard(),
-            )
-
-            return (
-                "ok",
-                200,
-            )
 
         if pending_action == "buy_subscription":
-            PENDING_ACTIONS.pop(
-                chat_id,
-                None,
-            )
+            # Оставляем режим покупки активным,
+            # чтобы клиент мог выбрать другой филиал
+            # без возврата в главное меню.
 
             if text == "Базовская":
                 send_message(
@@ -4583,6 +4593,12 @@ def telegram_webhook():
                     "📍 Базовская, 15А\n"
                     "💬 @Bulk_bazovskaya",
                     bazovskaya_admin_button(),
+                )
+
+                send_message(
+                    chat_id,
+                    "Можно выбрать другой филиал 👇",
+                    branch_keyboard(),
                 )
 
                 return (
@@ -4605,6 +4621,12 @@ def telegram_webhook():
                     subscription_purchase_button(
                         purchase_url
                     ),
+                )
+
+                send_message(
+                    chat_id,
+                    "Можно выбрать другой филиал 👇",
+                    branch_keyboard(),
                 )
 
             else:
@@ -4860,7 +4882,7 @@ def telegram_webhook():
             chat_id,
             "Выберите филиал, "
             "к которому относится сообщение:",
-            branch_keyboard(),
+            feedback_branch_keyboard(),
         )
 
         return (
@@ -4869,18 +4891,34 @@ def telegram_webhook():
         )
 
 
+    feedback_branches = {
+        "📍 Нагатинская":
+            "Нагатинская",
+
+        "📍 Беломорская":
+            "Беломорская",
+
+        "📍 Базовская":
+            "Базовская",
+
+        "📍 Истринская":
+            "Истринская",
+    }
+
     if (
         PENDING_ACTIONS.get(
             chat_id
         ) == "feedback_branch"
-        and text in BRANCHES
+        and text in feedback_branches
     ):
         FEEDBACK_DATA.setdefault(
             chat_id,
             {},
         )[
             "branch"
-        ] = text
+        ] = feedback_branches[
+            text
+        ]
 
         PENDING_ACTIONS[
             chat_id

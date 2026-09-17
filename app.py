@@ -224,7 +224,7 @@ def main_keyboard():
                 },
                 {
                     "text":
-                        "🎟️ Мой абонемент"
+                        "🛍 Купить абонемент"
                 },
             ],
             [
@@ -234,10 +234,14 @@ def main_keyboard():
                 },
                 {
                     "text":
-                        "⚙️ Мои данные"
+                        "🎟️ Мой абонемент"
                 },
             ],
             [
+                {
+                    "text":
+                        "⚙️ Мои данные"
+                },
                 {
                     "text":
                         "💬 Связаться с нами"
@@ -338,6 +342,48 @@ def booking_button(url):
             ]
         ]
     }
+
+
+def subscription_purchase_button(url):
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text":
+                        "🛍 Купить абонемент",
+                    "url":
+                        url,
+                }
+            ]
+        ]
+    }
+
+
+def bazovskaya_admin_button():
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text":
+                        "💬 Написать администратору",
+                    "url":
+                        "https://t.me/Bulk_bazovskaya",
+                }
+            ]
+        ]
+    }
+
+
+SUBSCRIPTION_PURCHASE_URLS = {
+    "Нагатинская":
+        "http://o1141.yclients.ru",
+
+    "Беломорская":
+        "http://o1425.yclients.ru",
+
+    "Истринская":
+        "http://o1694.yclients.ru",
+}
 
 
 def rebook_button(
@@ -4357,6 +4403,10 @@ def telegram_webhook():
     # =====================================================
 
     if text == "🏊 Записаться":
+        PENDING_ACTIONS[
+            chat_id
+        ] = "booking"
+
         send_message(
             chat_id,
             "Выберите филиал:",
@@ -4369,10 +4419,97 @@ def telegram_webhook():
         )
 
 
+    # =====================================================
+    # КУПИТЬ АБОНЕМЕНТ
+    # =====================================================
+
+    if text == "🛍 Купить абонемент":
+        PENDING_ACTIONS[
+            chat_id
+        ] = "buy_subscription"
+
+        send_message(
+            chat_id,
+            "Выберите филиал, в котором "
+            "хотите приобрести абонемент 💙",
+            branch_keyboard(),
+        )
+
+        return (
+            "ok",
+            200,
+        )
+
+
     if text in BRANCHES:
+        pending_action = (
+            PENDING_ACTIONS.get(
+                chat_id
+            )
+        )
+
+        if pending_action == "buy_subscription":
+            PENDING_ACTIONS.pop(
+                chat_id,
+                None,
+            )
+
+            if text == "Базовская":
+                send_message(
+                    chat_id,
+                    "🛍 Покупка абонемента — "
+                    "Базовская\n\n"
+                    "Для покупки абонемента "
+                    "свяжитесь, пожалуйста, "
+                    "с администратором филиала 💙\n\n"
+                    "📍 Базовская, 15А\n"
+                    "💬 @Bulk_bazovskaya",
+                    bazovskaya_admin_button(),
+                )
+
+                return (
+                    "ok",
+                    200,
+                )
+
+            purchase_url = (
+                SUBSCRIPTION_PURCHASE_URLS
+                .get(text)
+            )
+
+            if purchase_url:
+                send_message(
+                    chat_id,
+                    f"🛍 Покупка абонемента — "
+                    f"{text}\n\n"
+                    "Нажмите кнопку ниже, чтобы "
+                    "перейти к покупке 💙",
+                    subscription_purchase_button(
+                        purchase_url
+                    ),
+                )
+
+            else:
+                send_message(
+                    chat_id,
+                    "Для этого филиала покупка "
+                    "онлайн пока недоступна 💙",
+                    main_keyboard(),
+                )
+
+            return (
+                "ok",
+                200,
+            )
+
         branch = BRANCHES[
             text
         ]
+
+        PENDING_ACTIONS.pop(
+            chat_id,
+            None,
+        )
 
         send_message(
             chat_id,
